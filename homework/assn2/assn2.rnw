@@ -1,0 +1,126 @@
+\documentclass{article}
+\usepackage{fullpage}
+
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 2}
+\author{Kenny Flagg}
+\date{September 11, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE, message=FALSE,cache=FALSE>>=
+opts_chunk$set(fig.width = 10, fig.height = 5,
+               out.width = '\\linewidth', out.height = '0.5\\linewidth',
+               dev = 'pdf')
+require(xtable)
+@
+
+\begin{enumerate}
+
+\item
+
+\begin{itemize}
+
+\item Gelman et al defines probabilities as numbers associated with outcomes
+which are ``nonnegative, additive over mutually exclusive outcomes, and
+sum to 1 over all possible mutually exclusive outcomes'' (BDA3,
+\S 1.5, p.~11).
+
+\item
+
+\end{itemize}
+
+\item
+
+\item
+
+\item
+
+\item
+
+\item
+<<betas,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+curve(dbeta(x, 0.05, 0.05), xlim = c(0, 1), ylim = c(0, 3), lty = 1,
+      main = 'Several Beta Densities', ylab = 'Density', add = FALSE)
+curve(dbeta(x, 0.8, 0.8), lty = 2, add = TRUE)
+curve(dbeta(x, 1, 1), lty = 3, add = TRUE)
+curve(dbeta(x, 5, 5), lty = 6, add = TRUE)
+legend('topright', c(expression({alpha==beta}==0.05),
+                      expression({alpha==beta}==0.8),
+                      expression({alpha==beta}==1),
+                      expression({alpha==beta}==5)),
+       lty = c(1, 2, 3, 6))
+@
+
+\item
+
+\item
+
+\begin{enumerate}
+
+\item
+
+\item
+
+\end{enumerate}
+
+\item
+
+\item
+
+\begin{enumerate}
+
+\item
+
+\item
+
+\item
+
+\item
+
+\item
+
+\item
+
+\item
+
+\end{enumerate}
+
+\item
+
+\item
+
+\item
+
+\item
+
+\item
+
+\begin{enumerate}
+
+\item
+
+\item
+
+\end{enumerate}
+
+\item
+
+\begin{enumerate}
+
+\item
+
+\item
+
+\item
+
+\end{enumerate}
+
+\item
+
+\end{enumerate}
+
+\end{document}
