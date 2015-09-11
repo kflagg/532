@@ -41,7 +41,10 @@ sum to 1 over all possible mutually exclusive outcomes'' (BDA3,
 
 \item
 
-\item
+\item Below are several beta density curves. When \(\alpha\neq\beta\),
+increasing \(\alpha\) increases left-skew and increasing \(\beta\)
+increases right-skew.
+
 <<betas,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
 curve(dbeta(x, 0.05, 0.05), xlim = c(0, 1), ylim = c(0, 3), lty = 1,
       main = 'Several Beta Densities', ylab = 'Density', add = FALSE)
@@ -55,6 +58,196 @@ legend('topright', c(expression({alpha==beta}==0.05),
        lty = c(1, 2, 3, 6))
 @
 
+\item I had not realized that R's default parameterization for the
+Gamma distribution uses a rate parameter instead of a scale parameter.
+Fortunately this agrees with the parameterization in BDA3 (where the
+rate parameter is called an inverse scale parameter). It makes me wonder
+how many times I've incorrectly used a parameterization that I did not
+intend to use. I've plotted several gamma density curves below.
+
+<<gammas,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+curve(dgamma(x, 0.5, 0.5), xlim = c(0, 10), ylim = c(0, 1.5), lty = 1,
+      main = 'Several Gamma Densities', ylab = 'Density', add = FALSE)
+curve(dgamma(x, 1, 1), lty = 2, add = TRUE)
+curve(dgamma(x, 4, rate = 4), lty = 3, add = TRUE)
+curve(dgamma(x, 8, rate = 8), lty = 6, add = TRUE)
+legend('topright', c(expression({alpha==beta}==0.5),
+                      expression({alpha==beta}==1),
+                      expression({alpha==beta}==4),
+                      expression({alpha==beta}==8)),
+       lty = c(1, 2, 3, 6))
+@
+
+The inverse scale parameterization of the Gamma distribution forms a
+conjugate prior when used to model Poisson rates and Normal precisions
+(inverse variances), so it is often a default choice in these situations.
+
+\item
+
+\begin{enumerate}
+
+\item The posterior probability of infection is
+\begin{align*}
+Pr(\text{infection}|\text{test +})
+&=\frac{Pr(\text{test +}|\text{infection})Pr(\text{infection})}
+{Pr(\text{test +}|\text{infection})Pr(\text{infection})
++Pr(\text{test +}|\text{no infection})Pr(\text{no infection})}\\
+&=\frac{0.92Pr(\text{infection})}
+{0.92Pr(\text{infection})+0.08Pr(\text{no infection})}
+\end{align*}
+If the first doctor is correct, this works out to
+\begin{align*}
+Pr(\text{infection}|\text{test +})
+=\frac{(0.92)(0.05)}{(0.92)(0.05)+(0.08)(0.95)}=0.377
+\end{align*}
+so there is a 37.7\% chance that the patient is infected.
+
+If the second doctor is right,
+\begin{align*}
+Pr(\text{infection}|\text{test +})
+=\frac{(0.92)(0.1)}{(0.92)(0.1)+(0.08)(0.9)}=0.561
+\end{align*}
+and the patient has a 56.1\% probability of being infected.
+
+The second doctor believed the infection rate to be twice as large as
+what the first doctor believed. As a result, the second doctor would
+consider the patient as slightly more likely to be infected than not,
+while the first doctor would conclude that the patient is most likely
+not infected.
+
+I see this as illustrating the Bayesian interpretation of probability
+as describing the state a knowledge about something unobserved. If we
+could observe the infection status without measurement error (a perfect
+test) then we would definitively know if the patient is infected or not.
+Since the patient's status is unknown, the doctors must incorporate their
+previous knowledge about the infection and they come to different
+conclusions despite both observing the same test result. If we think
+that objectivity means that doctors should follow the likelihood principle
+and reach the same conclusions, then this could be support an argument
+for the use of uninformative priors when experts have disagreement.
+
+\item \(Beta(2, 20)\), \(Beta(3.8, 27.2)\)
+
+\end{enumerate}
+
+\item
+
+\item
+
+\begin{enumerate}
+
+\item 20 observations from \(Poisson(\lambda=5)\)
+
+<<pois1,echo=FALSE,results='asis'>>=
+set.seed(9801235)
+
+# Generate some data
+obsP1 <- rpois(20, 5)
+
+# Poisson MLE is the sample mean
+lambdaMLE1 <- mean(obsP1)
+
+# Output
+cat('Sample Mean: \\(\\bar x\\) = ', mean(obsP1),
+    ', Sample Variance: \\(s^2\\) = ', var(obsP1),
+    '\n\n Maximum Likelihood Estimate: \\(\\bar x\\) = ', lambdaMLE1,
+    ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', sd(obsP1) / sqrt(20),
+    '\n\n', sep = '')
+
+# Likelihood function
+# Assume theta and data are vectors
+L <- function(theta, data){
+  Ls <- matrix(NA, nrow = length(data), ncol = length(theta))
+  for(i in 1:length(data)){
+    for(j in 1:length(theta)){
+      Ls[i, j] <- dpois(data[i], theta[j])
+    }
+  }
+  return(apply(Ls, 2, prod))
+}
+
+# Plot the likelihood
+curve(L(x, obsP1), from = 0, to = 10,
+      main = expression(paste('Likelihood for ', lambda)),
+      xlab = expression(lambda),
+      ylab = expression(paste('L(', lambda, '|x)')))
+
+# True value
+segments(x0 = 5, y0 = 0, y1 = L(5, obsP1), col = 'red')
+
+# MLE
+segments(x0 = lambdaMLE1, y0 = 0, y1 = L(lambdaMLE1, obsP1))
+
+
+@
+
+\item 100 observations from \(Poisson(\lambda=5)\)
+
+\item 15 observations from \(N(\mu=10, \sigma^2=5)\)
+
+\item 5 observations from \(N(\mu=10, \sigma^2=5)\)
+
+\item 1 observations from \(Binomial(m=100, p=0.2)\)
+
+\item 30 observations from \(Binomial(m=100, p=0.2)\)
+
+\item
+
+\end{enumerate}
+
+\item Problem 1.1
+
+\begin{enumerate}
+
+\item We have \(y\sim N(\theta,\sigma^2)\) with
+\(Pr(\theta=1)=Pr(\theta=2)=\frac{1}{2}\). If \(\sigma=2\),
+\begin{align*}
+p(y,\theta)=\left(\frac{1}{2\sqrt{2\pi}}
+\exp\left(-\frac{(y-\theta^2)}{8}\right)\right)\left(\frac{1}{2}\right)
+=\frac{1}{4\sqrt{2\pi}}\exp\left(-\frac{(y-\theta)^2}{8}\right); \theta=1,2
+\end{align*}
+so the marginal density of \(y\) is
+\begin{align*}
+p(y)=\sum_{\theta=1}^2p(y,\theta)
+&=\frac{1}{4\sqrt{2\pi}}\exp\left(-\frac{(y-1)^2}{8}\right)
++\frac{1}{4\sqrt{2\pi}}\exp\left(-\frac{(y-2)^2}{8}\right)\\
+&=\frac{1}{4\sqrt{2\pi}}\left(e^{-\frac{(y-1)^2}{8}}
+-e^{\frac{(y-2)^2}{8}}\right)\text{.}
+\end{align*}
+
+<<prob1a,echo=FALSE>>=
+curve((exp(-(x-1)^2 / 8) + exp(-(x-2)^2 / 8)) / (4*sqrt(2*pi)),
+      main = 'Marginal Distribution of y',
+      from = -10, to = 10, xlab = 'y', ylab = expression(p(y)))
+@
+
+\item The posterior probability is
+\begin{align*}
+Pr(\theta=1|y=1)=\frac{p(y=1,\theta=1)}{p(y=1)}
+&=\frac{\frac{1}{4\sqrt{2\pi}}e^{-\frac{(1-1)^2}{8}}}
+{\frac{1}{4\sqrt{2\pi}}\left(e^{-\frac{(1-1)^2}{8}}
++e^{-\frac{(1-2)^2}{8}}\right)}\\
+&=\frac{1}{1+e^{-\frac{1}{8}}}\approx 0.5312\text{.}
+\end{align*}
+
+\item For any \(\sigma>0\), the posterior distribution is
+\begin{align*}
+p(\theta|y)=\frac{p(y,\theta)}{p(y)}
+&=\frac{\frac{1}{2\sigma\sqrt{2\pi}}e^{-\frac{(y-\theta)^2}{2\sigma^2}}}
+{\frac{1}{2\sigma\sqrt{2\pi}}\left(e^{-\frac{(y-1)^2}{2\sigma^2}}
++e^{-\frac{(y-2)^2}{2\sigma^2}}\right)}\\
+&=\frac{e^{-\frac{(y-\theta)^2}{2\sigma^2}}}
+{e^{-\frac{(y-1)^2}{2\sigma^2}}+e^{-\frac{(y-2)^2}{2\sigma^2}}};\theta=1,2
+\end{align*}
+so as \(\theta\) increases, each exponent approaches 0 and thus
+\(p(\theta|y)\to\frac{1}{2}\) for \(\theta=1,2\).
+
+\end{enumerate}
+
+\item
+
+\item
+
 \item
 
 \item
@@ -69,46 +262,6 @@ legend('topright', c(expression({alpha==beta}==0.05),
 
 \item
 
-\item
-
-\begin{enumerate}
-
-\item
-
-\item
-
-\item
-
-\item
-
-\item
-
-\item
-
-\item
-
-\end{enumerate}
-
-\item
-
-\item
-
-\item
-
-\item
-
-\item
-
-\begin{enumerate}
-
-\item
-
-\item
-
-\end{enumerate}
-
-\item
-
 \begin{enumerate}
 
 \item
@@ -119,7 +272,13 @@ legend('topright', c(expression({alpha==beta}==0.05),
 
 \end{enumerate}
 
-\item
+\item Steps of Statistical Inference:
+
+\begin{enumerate}
+
+\item Ask a question
+
+\end{enumerate}
 
 \end{enumerate}
 
