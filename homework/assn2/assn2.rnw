@@ -15,6 +15,10 @@
 opts_chunk$set(fig.width = 10, fig.height = 5,
                out.width = '\\linewidth', out.height = '0.5\\linewidth',
                dev = 'pdf')
+varbeta <- function(a, b, x = 0, n = 0){
+  return(c('Prior' = (a*b) / ((a+b)^2 * (a+b+1)),
+           'Posterior' = ((a+x)*(b+n-x)) / ((a+b+n)^2 * (a+b+n+1))))
+}
 require(xtable)
 @
 
@@ -24,7 +28,7 @@ require(xtable)
 
 \begin{itemize}
 
-\item Gelman et al defines probabilities as numbers associated with outcomes
+\item Gelman et al define probabilities as numbers associated with outcomes
 which are ``nonnegative, additive over mutually exclusive outcomes, and
 sum to 1 over all possible mutually exclusive outcomes'' (BDA3,
 \S 1.5, p.~11).
@@ -41,11 +45,11 @@ sum to 1 over all possible mutually exclusive outcomes'' (BDA3,
 
 \item
 
-\item Below are several beta density curves. When \(\alpha\neq\beta\),
-increasing \(\alpha\) increases left-skew and increasing \(\beta\)
-increases right-skew.
+\item Below are several beta density curves with \(\alpha=\beta\). When
+\(\alpha\neq\beta\), increasing \(\alpha\) increases left-skew and
+increasing \(\beta\) increases right-skew.
 
-<<betas,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+<<betas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 curve(dbeta(x, 0.05, 0.05), xlim = c(0, 1), ylim = c(0, 3), lty = 1,
       main = 'Several Beta Densities', ylab = 'Density', add = FALSE)
 curve(dbeta(x, 0.8, 0.8), lty = 2, add = TRUE)
@@ -65,9 +69,10 @@ rate parameter is called an inverse scale parameter). It makes me wonder
 how many times I've incorrectly used a parameterization that I did not
 intend to use. I've plotted several gamma density curves below.
 
-<<gammas,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
-curve(dgamma(x, 0.5, 0.5), xlim = c(0, 10), ylim = c(0, 1.5), lty = 1,
-      main = 'Several Gamma Densities', ylab = 'Density', add = FALSE)
+<<gammas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
+curve(dgamma(x, 0.5, 0.5), xlim = c(0, 6), ylim = c(0, 1.5), lty = 1,
+      lwd = 2,       main = 'Several Gamma Densities', ylab = 'Density',
+      add = FALSE)
 curve(dgamma(x, 1, 1), lty = 2, add = TRUE)
 curve(dgamma(x, 4, rate = 4), lty = 3, add = TRUE)
 curve(dgamma(x, 8, rate = 8), lty = 6, add = TRUE)
@@ -123,22 +128,71 @@ Since the patient's status is unknown, the doctors must incorporate their
 previous knowledge about the infection and they come to different
 conclusions despite both observing the same test result. If we think
 that objectivity means that doctors should follow the likelihood principle
-and reach the same conclusions, then this could be support an argument
-for the use of uninformative priors when experts have disagreement.
+and reach the same conclusions given the same data, then this example
+could support an argument for the use of uninformative priors when experts
+have disagreement.
 
-\item \(Beta(2, 20)\), \(Beta(3.8, 27.2)\)
+\item Let \(y=1\) if the patient tests positive, 0 otherwise. I will
+use \(Beta(2, 38)\) for the first doctor's prior and \(Beta(7, 63)\)
+for the second doctor's prior. These have similar variances (0.00116
+and 0.00127) and their means agree with the doctors' opinions. The
+densities are plotted below.
+
+<<docbetas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
+curve(dbeta(x, 2, 38), from = 0, to = 1, lty = 1,
+      ylab = expression(p(theta)), main = 'Comparison of Doctors\' Priors')
+curve(dbeta(x, 7, 63), lty = 2, add = TRUE)
+legend('topright', lty = 1:2, legend = c(expression(E(theta)==0.05),
+                                         expression(E(theta)==0.10)))
+@
+
+If I knew something about how the doctors formed their opinions  I
+might choose priors to reflect that, but since I do not have that
+information I treat the opinions as point estimates and assume that
+they are approximately equally precise.
+
+The probability model for \(y\) is
+\begin{align*}
+Pr(y=1|\theta)=0.92\theta+0.08(1-\theta)
+\end{align*}
 
 \end{enumerate}
 
-\item
+\item Let \(y\) be the number or girls in \(n=241945+251527=493472\)
+births. The model is \(y|\theta\sim Binomial(493472,\theta)\). Laplace used
+the prior \(\theta\sim Beta(1, 1)\). Then
+\begin{align*}
+p(y,\theta)=\left(\begin{pmatrix}493472\\y\end{pmatrix}
+\theta^y(1-\theta)^{493472-y}\right)\left(I_{(0,1)}(\theta)\right)
+=\begin{pmatrix}493472\\y\end{pmatrix}\theta^y(1-\theta)^{493472-y}
+\end{align*}
+so
+\begin{align*}
+p(\theta|y)\propto\theta^y(1-\theta)^{493472-y}
+\end{align*}
+and we see that the posterior is \(\theta|y\sim Beta(y+1, 493473-y)\).
+
+After observing \(y=241945\) female births, we make posterior
+inferences from the \(Beta(241946, 251528)\) distribution. R tells me that
+\begin{align*}
+Pr(\theta\geq 0.5|y=241945)=1.14606\times 10^{-42}\text{.}
+\end{align*}
+Thus, rounding to any reasonable number of significant digits,
+we get that essentially
+\begin{align*}
+Pr(\theta<0.5|y=241945)=1\text{.}
+\end{align*}
+I wouldn't use the phrase ``morally certain,'' but the evidence is
+overwhelming that fewer than half of the births around that time were
+females.
 
 \item
 
 \begin{enumerate}
 
-\item 20 observations from \(Poisson(\lambda=5)\)
+\item 20 observations from \(Poisson(\lambda=5)\):\vspace{5pt}
 
-<<pois1,echo=FALSE,results='asis'>>=
+<<pois1a,echo=FALSE,results='asis'>>=
 set.seed(9801235)
 
 # Generate some data
@@ -146,17 +200,19 @@ obsP1 <- rpois(20, 5)
 
 # Poisson MLE is the sample mean
 lambdaMLE1 <- mean(obsP1)
+lambdaSE1 <- sd(obsP1) / sqrt(20)
 
 # Output
-cat('Sample Mean: \\(\\bar x\\) = ', mean(obsP1),
-    ', Sample Variance: \\(s^2\\) = ', var(obsP1),
-    '\n\n Maximum Likelihood Estimate: \\(\\bar x\\) = ', lambdaMLE1,
-    ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', sd(obsP1) / sqrt(20),
+print(xtable(rbind(c(summary(obsP1),
+                     'Var.' = var(obsP1))[c(4, 7, 1, 2, 3, 5, 6)])),
+      floating = FALSE, include.rownames = FALSE)
+cat('\n\nMaximum Likelihood Estimate: \\(\\hat{\\lambda}=\\bar y\\) = ',
+    lambdaMLE1, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', lambdaSE1,
     '\n\n', sep = '')
 
 # Likelihood function
 # Assume theta and data are vectors
-L <- function(theta, data){
+Lpois <- function(theta, data){
   Ls <- matrix(NA, nrow = length(data), ncol = length(theta))
   for(i in 1:length(data)){
     for(j in 1:length(theta)){
@@ -167,35 +223,353 @@ L <- function(theta, data){
 }
 
 # Plot the likelihood
-curve(L(x, obsP1), from = 0, to = 10,
+curve(Lpois(x, obsP1), from = 3, to = 7, yaxt = 'n',
       main = expression(paste('Likelihood for ', lambda)),
       xlab = expression(lambda),
-      ylab = expression(paste('L(', lambda, '|x)')))
+      ylab = expression(paste('L(', lambda, '|y)')))
 
 # True value
-segments(x0 = 5, y0 = 0, y1 = L(5, obsP1), col = 'red')
+segments(x0 = 5, y0 = 0, y1 = Lpois(5, obsP1), lty = 2, col = 'red')
 
 # MLE
-segments(x0 = lambdaMLE1, y0 = 0, y1 = L(lambdaMLE1, obsP1))
+segments(x0 = lambdaMLE1, y0 = 0, y1 = Lpois(lambdaMLE1, obsP1))
 
+# Confidence bounds
+segments(x0 = lambdaMLE1 - 1.96*lambdaSE1, y0 = 0,
+         y1 = Lpois(lambdaMLE1 - 1.96*lambdaSE1, obsP1), lty = 3)
+segments(x0 = lambdaMLE1 + 1.96*lambdaSE1, y0 = 0,
+         y1 = Lpois(lambdaMLE1 + 1.96*lambdaSE1, obsP1), lty = 3)
 
+# Label it!
+legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% Normal confidence bounds'))
 @
 
-\item 100 observations from \(Poisson(\lambda=5)\)
+\item 100 observations from \(Poisson(\lambda=5)\):\vspace{5pt}
 
-\item 15 observations from \(N(\mu=10, \sigma^2=5)\)
+<<pois2a,echo=FALSE,results='asis'>>=
+set.seed(136543511)
 
-\item 5 observations from \(N(\mu=10, \sigma^2=5)\)
+# Generate some data
+obsP2 <- rpois(100, 5)
 
-\item 1 observations from \(Binomial(m=100, p=0.2)\)
+# Poisson MLE is the sample mean
+lambdaMLE2 <- mean(obsP2)
+lambdaSE2 <- sd(obsP2) / sqrt(100)
 
-\item 30 observations from \(Binomial(m=100, p=0.2)\)
+# Output
+print(xtable(rbind(c(summary(obsP2),
+                     'Var.' = var(obsP2))[c(4, 7, 1, 2, 3, 5, 6)])),
+      floating = FALSE, include.rownames = FALSE)
+cat('\n\nMaximum Likelihood Estimate: \\(\\hat{\\lambda}=\\bar y\\) = ',
+    lambdaMLE2, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', lambdaSE2,
+    '\n\n', sep = '')
+
+# Likelihood function
+# Assume theta and data are vectors
+#Lpois <- function(theta, data){
+#  Ls <- matrix(NA, nrow = length(data), ncol = length(theta))
+#  for(i in 1:length(data)){
+#    for(j in 1:length(theta)){
+#      Ls[i, j] <- dpois(data[i], theta[j])
+#    }
+#  }
+#  return(apply(Ls, 2, prod))
+#}
+
+# Plot the likelihood
+curve(Lpois(x, obsP2), from = 3, to = 7, yaxt = 'n',
+      main = expression(paste('Likelihood for ', lambda)),
+      xlab = expression(lambda),
+      ylab = expression(paste('L(', lambda, '|y)')))
+
+# True value
+segments(x0 = 5, y0 = 0, y1 = Lpois(5, obsP2), lty = 2, col = 'red')
+
+# MLE
+segments(x0 = lambdaMLE2, y0 = 0, y1 = Lpois(lambdaMLE2, obsP2))
+
+# Confidence bounds
+segments(x0 = lambdaMLE2 - 1.96*lambdaSE2, y0 = 0,
+         y1 = Lpois(lambdaMLE2 - 1.96*lambdaSE2, obsP2), lty = 3)
+segments(x0 = lambdaMLE2 + 1.96*lambdaSE2, y0 = 0,
+         y1 = Lpois(lambdaMLE2 + 1.96*lambdaSE2, obsP2), lty = 3)
+
+# Label it!
+legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% Normal confidence bounds'))
+@
+
+\item 15 observations from \(N(\mu=10, \sigma^2=5)\):\vspace{5pt}
+
+<<norm1a,echo=FALSE,results='asis',cache=TRUE>>=
+set.seed(123746)
+
+# Generate some data
+obsN1 <- rnorm(15, 10, sqrt(5))
+
+# MLE for mu is the sample mean
+muMLE1 <- mean(obsN1)
+muSE1 <- sd(obsN1) / sqrt(15)
+
+# MLE for sigma^2 is ((n - 1)/n) s^2
+sigmasqMLE1 <- var(obsN1) * 14 / 15
+
+# Output
+print(xtable(rbind(c(summary(obsN1),
+                     'Var.' = var(obsN1))[c(4, 7, 1, 2, 3, 5, 6)])),
+      floating = FALSE, include.rownames = FALSE)
+cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', muMLE1,
+    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', muSE1,
+    ', \\(\\hat{\\sigma}^2=\\dfrac{\\sum (y_i-\\bar{y})^2}{n}\\) = ',
+    sigmasqMLE1, '\n\n', sep = '')
+@
+\begin{center}
+<<norm1b,echo=FALSE,cache=TRUE,out.width='0.6\\linewidth',fig.width=6>>=
+# Likelihood function
+# Assume data is a vector and theta is a data frame
+logLnorm <- function(theta, data){
+  Ls <- matrix(NA, nrow = length(data), ncol = nrow(theta))
+  for(j in 1:nrow(theta)){
+    for(i in 1:length(data)){
+      Ls[i, j] <- dnorm(data[i], theta$mu[j], sqrt(theta$sigmasq[j]),
+                        log = TRUE)
+    }
+  }
+  return(apply(Ls, 2, sum))
+}
+
+# Plot the likelihood
+mus <- seq(5, 15, 0.2)
+sigmas <- seq(0.3, 36, 0.3)
+thetas <- expand.grid('mu' = mus, 'sigmasq' = sigmas)
+logLs <- logLnorm(thetas, obsN1)
+contour(x = mus, y = sigmas,
+        z = exp(matrix(logLs, nrow = length(mus))), nlevels = 20,
+        main = expression(paste('Likelihood for ', mu, ' and ', sigma^2)),
+        xlab = expression(mu), ylab = expression(sigma^2))
+
+# True value and MLE
+points(x = c(10, muMLE1), y = c(5, sigmasqMLE1),
+       pch = 19, col = c('red', 'black'))
+
+# Confidence bounds
+ml <- muMLE1 + qt(0.025, 14) * muSE1
+mu <- muMLE1 + qt(0.975, 14) * muSE1
+sl <- 14 * var(obsN1) / qchisq(0.975, 14)
+su <- 14 * var(obsN1) / qchisq(0.025, 14)
+segments(x0 = ml, y0 = sl, x1 = mu, lty = 3)
+segments(x0 = mu, y0 = sl, y1 = su, lty = 3)
+segments(x0 = ml, y0 = su, x1 = mu, lty = 3)
+segments(x0 = ml, y0 = sl, y1 = su, lty = 3)
+
+# Label it!
+legend('topright', col = c('red', 'black', 'black'),
+       pch = c(19, 19, NA), lty = c(NA, NA, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% confidence rectangle'))
+@
+\end{center}
+
+The confidence bounds are based on
+\(\dfrac{\bar{y}-\mu}{s/sqrt{n}}\sim t_{14}\)
+and \(\dfrac{n\hat{\sigma}^2}{\sigma^2}\sim\chi^2_{14}\).
+
+\item 5 observations from \(N(\mu=10, \sigma^2=5)\):\vspace{5pt}
+
+<<norm2a,echo=FALSE,results='asis',cache=TRUE>>=
+set.seed(263)
+
+# Generate some data
+obsN2 <- rnorm(5, 10, sqrt(5))
+
+# MLE for mu is the sample mean
+muMLE2 <- mean(obsN2)
+muSE2 <- sd(obsN2) / sqrt(5)
+
+# MLE for sigma^2 is ((n - 1)/n) s^2
+sigmasqMLE2 <- var(obsN2) * 4 / 5
+
+# Output
+print(xtable(rbind(c(summary(obsN2),
+                     'Var.' = var(obsN2))[c(4, 7, 1, 2, 3, 5, 6)])),
+      floating = FALSE, include.rownames = FALSE)
+cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', muMLE2,
+    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', muSE2,
+    ', \\(\\hat{\\sigma}^2=\\dfrac{\\sum (y_i-\\bar{y})^2}{n}\\) = ',
+    sigmasqMLE2, '\n\n', sep = '')
+@
+\begin{center}
+<<norm2b,echo=FALSE,cache=TRUE,out.width='0.6\\linewidth',fig.width=6>>=
+# Likelihood function
+# Assume data is a vector and theta is a data frame
+#logLnorm <- function(theta, data){
+#  Ls <- matrix(NA, nrow = length(data), ncol = nrow(theta))
+#  for(j in 1:nrow(theta)){
+#    for(i in 1:length(data)){
+#      Ls[i, j] <- dnorm(data[i], theta$mu[j], sqrt(theta$sigmasq[j]),
+#                        log = TRUE)
+#    }
+#  }
+#  return(apply(Ls, 2, sum))
+#}
+
+# Plot the likelihood
+logLs <- logLnorm(thetas, obsN2)
+contour(x = mus, y = sigmas,
+        z = exp(matrix(logLs, nrow = length(mus))), nlevels = 20,
+        main = expression(paste('Likelihood for ', mu, ' and ', sigma^2)),
+        xlab = expression(mu), ylab = expression(sigma^2))
+
+# True value and MLE
+points(x = c(10, muMLE2), y = c(5, sigmasqMLE2),
+       pch = 19, col = c('red', 'black'))
+
+# Confidence bounds
+ml <- muMLE2 + qt(0.025, 4) * muSE2
+mu <- muMLE2 + qt(0.975, 4) * muSE2
+sl <- 4 * var(obsN2) / qchisq(0.975, 4)
+su <- 4 * var(obsN2) / qchisq(0.025, 4)
+segments(x0 = ml, y0 = sl, x1 = mu, lty = 3)
+segments(x0 = mu, y0 = sl, y1 = su, lty = 3)
+segments(x0 = ml, y0 = su, x1 = mu, lty = 3)
+segments(x0 = ml, y0 = sl, y1 = su, lty = 3)
+
+# Label it!
+legend('topright', col = c('red', 'black', 'black'),
+       pch = c(19, 19, NA), lty = c(NA, NA, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% confidence rectangle'))
+@
+\end{center}
+
+The confidence bounds are based on
+\(\dfrac{\bar{y}-\mu}{s/\sqrt{n}}\sim t_{4}\)
+and \(\dfrac{n\hat{\sigma}^2}{\sigma^2}\sim\chi^2_{4}\).
+
+\item 1 observation from \(Binomial(m=100, p=0.2)\):\vspace{5pt}
+
+<<bin1a,echo=FALSE,results='asis'>>=
+set.seed(762617473)
+
+# Generate some data
+obsB1 <- rbinom(1, 100, 0.2)
+
+# Binomial MLE is the number of successes over the total
+pMLE1 <- obsB1 / 100
+pSE1 <- sqrt(pMLE1 * (1 - pMLE1)) / 10
+
+# Output
+cat('Observed \\(y\\) = ', obsB1, ' successes in \\(m=100\\) trials',
+    '\n\nMaximum Likelihood Estimate: \\(\\hat{p}=\\dfrac{y}{m}\\) = ',
+    pMLE1, ', SE: \\(\\sqrt{\\dfrac{\\hat{p}(1-\\hat{p})}{n}}\\) = ',
+    pSE1, '\n\n', sep = '')
+
+# Likelihood function
+# Assume theta and data are vectors
+Lbinom <- function(theta, data, m){
+  Ls <- matrix(NA, nrow = length(data), ncol = length(theta))
+  for(i in 1:length(data)){
+    for(j in 1:length(theta)){
+      Ls[i, j] <- dbinom(data[i], m, theta[j])
+    }
+  }
+  return(apply(Ls, 2, prod))
+}
+
+# Plot the likelihood
+curve(Lbinom(x, obsB1, 100), from = 0.05, to = 0.35, yaxt = 'n',
+      main = 'Likelihood for p', xlab = 'p',
+      ylab = 'L(p|y)')
+
+# True value
+segments(x0 = 0.2, y0 = 0, y1 = Lbinom(0.2, obsB1, 100), lty = 2, col = 'red')
+
+# MLE
+segments(x0 = pMLE1, y0 = 0, y1 = Lbinom(pMLE1, obsB1, 100))
+
+# Confidence bounds
+segments(x0 = pMLE1 - 1.96*pSE1, y0 = 0,
+         y1 = Lbinom(pMLE1 - 1.96*pSE1, obsB1, 100), lty = 3)
+segments(x0 = pMLE1 + 1.96*pSE1, y0 = 0,
+         y1 = Lbinom(pMLE1 + 1.96*pSE1, obsB1, 100), lty = 3)
+
+# Label it!
+legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% Normal confidence bounds'))
+@
+
+\item 30 observations from \(Binomial(m=100, p=0.2)\):\vspace{5pt}
+
+<<bin2a,echo=FALSE,results='asis'>>=
+set.seed(2348903)
+
+# Generate some data
+obsB2 <- rbinom(30, 100, 0.2)
+
+# Binomial MLE is the number of successes over the total
+pMLE2 <- sum(obsB2) / 3000
+pSE2 <- sqrt(pMLE2 * (1 - pMLE2) / 3000)
+
+# Output
+print(xtable(rbind(c(summary(obsB2),
+                     'Var.' = var(obsB2))[c(4, 7, 1, 2, 3, 5, 6)])),
+      floating = FALSE, include.rownames = FALSE)
+cat('\n\nObserved \\(\\sum y_i\\) = ', sum(obsB2),
+    ' successes in \\(nm=3000\\) trials\n\nMaximum Likelihood Estimate: ',
+    '\\(\\hat{p}=\\dfrac{\\sum y_i}{nm}\\) = ', pMLE2,
+    ', SE: \\(\\sqrt{\\dfrac{\\hat{p}(1-\\hat{p})}{nm}}\\) = ',
+    pSE2, '\n\n', sep = '')
+
+# Likelihood function
+# Assume theta and data are vectors
+#Lbinom <- function(theta, data, m){
+#  Ls <- matrix(NA, nrow = length(data), ncol = length(theta))
+#  for(i in 1:length(data)){
+#    for(j in 1:length(theta)){
+#      Ls[i, j] <- dbinom(data[i], m, theta[j])
+#    }
+#  }
+#  return(apply(Ls, 2, prod))
+#}
+
+# Plot the likelihood
+curve(Lbinom(x, obsB2, 100), from = 0.05, to = 0.35, yaxt = 'n', n = 201,
+      main = 'Likelihood for p', xlab = 'p',
+      ylab = 'L(p|y)')
+
+# True value
+segments(x0 = 0.2, y0 = 0, y1 = Lbinom(0.2, obsB2, 100), lty = 2, col = 'red')
+
+# MLE
+segments(x0 = pMLE2, y0 = 0, y1 = Lbinom(pMLE2, obsB2, 100))
+
+# Confidence bounds
+segments(x0 = pMLE2 - 1.96*pSE2, y0 = 0,
+         y1 = Lbinom(pMLE2 - 1.96*pSE2, obsB2, 100), lty = 3)
+segments(x0 = pMLE2 + 1.96*pSE2, y0 = 0,
+         y1 = Lbinom(pMLE2 + 1.96*pSE2, obsB2, 100), lty = 3)
+
+# Label it!
+legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
+       legend = c('True parameter value',
+                  'Maximum likelihood estimate',
+                  '95% Normal confidence bounds'))
+@
 
 \item
 
 \end{enumerate}
 
-\item Problem 1.1
+\item
 
 \begin{enumerate}
 
@@ -212,14 +586,16 @@ p(y)=\sum_{\theta=1}^2p(y,\theta)
 &=\frac{1}{4\sqrt{2\pi}}\exp\left(-\frac{(y-1)^2}{8}\right)
 +\frac{1}{4\sqrt{2\pi}}\exp\left(-\frac{(y-2)^2}{8}\right)\\
 &=\frac{1}{4\sqrt{2\pi}}\left(e^{-\frac{(y-1)^2}{8}}
--e^{\frac{(y-2)^2}{8}}\right)\text{.}
++e^{\frac{(y-2)^2}{8}}\right)\text{.}
 \end{align*}
 
-<<prob1a,echo=FALSE>>=
+\begin{center}
+<<prob1a,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 curve((exp(-(x-1)^2 / 8) + exp(-(x-2)^2 / 8)) / (4*sqrt(2*pi)),
       main = 'Marginal Distribution of y',
       from = -10, to = 10, xlab = 'y', ylab = expression(p(y)))
 @
+\end{center}
 
 \item The posterior probability is
 \begin{align*}
@@ -239,24 +615,68 @@ p(\theta|y)=\frac{p(y,\theta)}{p(y)}
 &=\frac{e^{-\frac{(y-\theta)^2}{2\sigma^2}}}
 {e^{-\frac{(y-1)^2}{2\sigma^2}}+e^{-\frac{(y-2)^2}{2\sigma^2}}};\theta=1,2
 \end{align*}
-so as \(\theta\) increases, each exponent approaches 0 and thus
+so as \(\sigma\) increases, each exponent approaches 0 and thus
 \(p(\theta|y)\to\frac{1}{2}\) for \(\theta=1,2\).
 
+\(\theta\) appears only in the exponent of the numerator, so as \(\sigma\)
+decreases, \(-\dfrac{(y-\theta)^2}{2\sigma^2}\) decreases and the
+distribution is pulled towards \(y\).
+
 \end{enumerate}
 
 \item
-
-\item
-
-\item
+\begin{align*}
+Pr(\text{identical}|\text{2 males})
+&=\frac{Pr(\text{2 males}|\text{identical})Pr(\text{identical})}
+{Pr(\text{2 males}|\text{identical})Pr(\text{identical})
++Pr(\text{2 males}|\text{fraternal})Pr(\text{fraternal})}\\
+&=\frac{Pr(\text{male})Pr(\text{identical})}
+{Pr(\text{male})Pr(\text{identical})
++Pr(\text{male})Pr(\text{male})Pr(\text{fraternal})}\\
+&=\frac{\left(\frac{1}{2}\right)\left(\frac{1}{300}\right)}
+{\left(\frac{1}{2}\right)\left(\frac{1}{300}\right)
++\left(\frac{1}{4}\right)\left(\frac{1}{125}\right)}\\
+&=\frac{\frac{1}{300}}{\frac{1}{300}+\frac{1}{250}}=\frac{5}{11}
+\end{align*}
 
 \item
 
 \begin{enumerate}
 
-\item
+\item If we consider the outcome of the roll to be an observable
+quantity that \(A\) has observed and \(B\) has not, then \(I_A\)
+contains the outcome of roll but \(I_B\) contains only the
+information that the die is fair. Then the probabilities assigned
+by \(A\) and \(B\) are
+\begin{align*}
+P_A(6)&=\begin{cases}
+1 & I_A=\text{``The roll is a 6.''}\\
+0 & I_A=\text{``The roll is not a 6.''}
+\end{cases}\\
+P_B(6)&=\frac{1}{6}\text{.}
+\end{align*}
+Since \(A\) has perfect knowledge of the outcome, \(A\) no longer
+considers the event to be random. However, lack of knowledge leads
+\(B\) to assign probabilities based on the physical process of the
+die roll.
 
-\item
+\item An individual with little knowledge of soccer, such as \(A\)
+or myself, might look up the number of FIFA member countries on
+Wikipedia and assume all of the 209 countries' teams are equally
+likely to qualify for and win the World Cup. Then \(I_A\) = ``There
+are 209 countries that participate in FIFA'' and \(A\) would assign
+the probability \(P_A(\text{Brazil wins the World Cup})=\dfrac{1}{209}\).
+
+An avid follower like \(B\) would adjust the probability based on
+observed information about the players and the outcomes of matches
+in the qualifying round, as well as on the structure of the
+qualifing tournament. Perhaps, based on the historical record, \(B\)
+would assume that Brazil is guaranteed to be one of the 32 teams that
+qualify for the World Cup and has a better chance of winning than some
+other qualifying teams, and then assign a probability of
+\(P_B(\text{Brazil wins the World Cup})=p>\dfrac{1}{32}\). The exact
+value could vary a lot based on what information \(B\)
+observed from watching previous matches.
 
 \end{enumerate}
 
@@ -264,11 +684,174 @@ so as \(\theta\) increases, each exponent approaches 0 and thus
 
 \begin{enumerate}
 
-\item
+\setcounter{enumii}{1}
+\item If \(y\sim Binomial(n,\theta)\) and \(\theta\sim Beta(\alpha,\beta)\),
+then \(\theta|y\sim Beta(\alpha+y,\beta+n)\) so the posterior mean
+is \(E(\theta|y)=\dfrac{\alpha+y}{\alpha+\beta+n}\).
+
+If \(\dfrac{\alpha}{\alpha+\beta}<\dfrac{y}{n}\) then
+\begin{align*}
+n\alpha&<y(\alpha+\beta)\\
+\implies n\alpha+ny&<y(\alpha+\beta)+ny\\
+\implies n(\alpha+y)&<y(\alpha+\beta+n)\\
+\implies\frac{\alpha+y}{\alpha+\beta+n}&<\frac{y}{n}\text{.}
+\end{align*}
+Also,
+\begin{align*}
+n\alpha&<y(\alpha+\beta)\\
+\implies \alpha(\alpha+\beta)+n\alpha&<\alpha(\alpha+\beta)+y(\alpha+\beta)\\
+\implies \alpha(\alpha+\beta+n)&<(\alpha+\beta)(\alpha+y)\\
+\implies\frac{\alpha}{\alpha+\beta}&<\frac{\alpha+y}{\alpha+\beta+n}\text{,}
+\end{align*}
+so
+\begin{align*}
+\frac{\alpha}{\alpha+\beta}<\frac{\alpha+y}{\alpha+\beta+n}<\frac{y}{n}
+\text{.}
+\end{align*}
+If \(\dfrac{\alpha}{\alpha+\beta}>\dfrac{y}{n}\), the same steps
+(with the directions of the inequalities reversed) will estiablish
+\begin{align*}
+\frac{\alpha}{\alpha+\beta}>\frac{\alpha+y}{\alpha+\beta+n}>\frac{y}{n}
+\text{.}
+\end{align*}
+Therefore, if \(\dfrac{\alpha}{\alpha+\beta}\neq\dfrac{y}{n}\) then
+the posterior mean of \(\theta\) is between these values.
+
+\item If \(\theta\sim Unif(0,1)=Beta(1,1)\), then
+\(\theta|y\sim Beta(y+1,n-y+1)\). The prior variance is
+\begin{align*}
+Var(\theta)=\frac{1}{12}
+\end{align*}
+and the posterior variance is
+\begin{align*}
+Var(\theta|y)=\frac{(y+1)(n-y+1)}{(n+2)^2(n+3)}\text{.}
+\end{align*}
+Since the quadratic \((t+1)(n-t+1)\) is maximized by \(t=\dfrac{n}{2}\),
+\begin{align*}
+Var(\theta|y)=\frac{(y+1)(n-y+1)}{(n+2)^2(n+3)}
+\leq\frac{(\frac{n}{2}+1)^2}{(n+2)^2(n+3)}\text{.}
+\end{align*}
+The rightmost expression is decreasing in \(n\) for \(n\geq 0\). If
+any data is observed then \(n\geq 1\), so therefore
+\begin{align*}
+Var(\theta|y)\leq\frac{(\frac{1}{2}+1)^2}{(1+2)^2(1+3)}
+=\frac{1}{16}<\frac{1}{12}=Var(\theta)\text{.}
+\end{align*}
+
+\item The variance could increase if we use an informative prior and
+then observe contradictory data. If our prior is based on \(\alpha=9\)
+successes and \(\beta=1\) failures, and then we observe \(y=1\)
+success in another \(n=10\) trials, the prior variance is
+\begin{align*}
+Var(\theta)=\frac{(9)(1)}{(9+1)^2(9+1+1)}\approx 0.0082
+\end{align*}
+but the posterior variance is
+\begin{align*}
+Var(\theta|y)=\frac{(9+1)(1+10-1)}{(9+1+10)^2(9+1+10+1)}\approx 0.0119
+\text{.}
+\end{align*}
+
+\end{enumerate}
 
 \item
 
-\item
+\begin{enumerate}
+
+\item We have \(\theta\in(0,\infty)\) and use the ``non-informative''
+improper prior \(p_\theta(\theta)=I_{(0,\infty)}(\theta)\). If we want
+to consider the transformation \(\phi=\log(\theta)\) then the prior
+distribution of \(\phi\) is
+\begin{align*}
+p_\phi(\phi)=p_\theta(e^\phi)\left|\frac{d\theta}{d\phi}\right|
+=I_{(0,\infty)}(e^\phi)e^\phi=I_{(\infty,\infty)}(\phi)e^\phi
+\end{align*}
+which looks like we are expecting very large values of \(\phi\).
+
+\item The likelihood is
+\begin{align*}
+p(y|\theta)=\frac{e^{-\theta}\theta^y}{y!}
+\end{align*}
+so
+\begin{align*}
+\log(p(y|\theta))&=-\theta+y\log(\theta)-\log(y!)\text{,}\\
+\frac{d}{d\theta}\log(p(y|\theta))&=-1+\frac{y}{\theta}\text{,}\\
+\frac{d^2}{d\theta^2}\log(p(y|\theta))&=-\frac{y}{\theta^2}\text{.}
+\end{align*}
+Then the Fisher information is
+\begin{align*}
+J(\theta)=-E\left(\frac{d^2}{d\theta^2}\log(p(y|\theta))|\theta\right)
+=-E\left(-\frac{y}{\theta^2}|\theta\right)=\frac{1}{\theta}
+\end{align*}
+so Jefferys' prior has the form
+\begin{align*}
+p(\theta)\propto\left(J(\theta)\right)^\frac{1}{2}
+=\left(\frac{1}{\theta}\right)^\frac{1}{2}=\theta^{-\frac{1}{2}}
+\end{align*}
+and so \(\theta\sim Beta\left(\frac{1}{2},1\right)\).
+
+The \(Gamma\left(\frac{1}{2},1\right)\) density seems to be a close
+match for small \(\theta\).
+
+\begin{center}
+<<betagamma,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
+curve(dbeta(x, 0.5, 1), from = 0, to = 1,
+      xlab = expression(theta), ylab = expression(p(theta)),
+      main = 'Comparison of Beta(1/2, 1) and Gamma(1/2, 1) Densities')
+curve(dgamma(x, 0.5, 1), lty = 2, add = TRUE)
+legend('topright', lty = c(1, 2),
+       legend = c('Beta(1/2, 1)', 'Gamma(1/2, 1)'))
+@
+\end{center}
+
+\end{enumerate}
+
+\item Comparing various \(Beta(\alpha,\beta)\) prior distributions
+for \(y|\theta\sim Binomial(m,\theta)\):
+
+\begin{enumerate}
+
+\item \(m=6, y=2, \dfrac{y}{m}=\dfrac{1}{3}\)
+
+\begin{tabular}{cccc}
+\hline
+\(p(\theta)\)&\(E(\theta)\)&\(p(\theta|y)\)&\(E(\theta|y)\)\\
+\hline
+\(Beta(1,1)\)&\(1/2\)&\(Beta(3,5)\)&\(3/8\)\\
+\(Beta(0.5,0.5)\)&\(1/2\)&\(Beta(2.5,4.5)\)&\(5/14\)\\
+\(Beta(0,0)\)&undefined&\(Beta(2,4)\)&\(1/3\)\\
+\hline
+\end{tabular}
+
+\item \(m=30, y=10, \dfrac{y}{m}=\dfrac{1}{3}\)
+
+\begin{tabular}{cccc}
+\hline
+\(p(\theta)\)&\(E(\theta)\)&\(p(\theta|y)\)&\(E(\theta|y)\)\\
+\hline
+\(Beta(1,1)\)&\(1/2\)&\(Beta(11,21)\)&\(11/32\)\\
+\(Beta(0.5,0.5)\)&\(1/2\)&\(Beta(10.5,20.5)\)&\(21/62\)\\
+\(Beta(0,0)\)&undefined&\(Beta(10,20)\)&\(1/3\)\\
+\hline
+\end{tabular}
+
+\item \(m=90, y=30, \dfrac{y}{m}=\dfrac{1}{3}\)
+
+\begin{tabular}{cccc}
+\hline
+\(p(\theta)\)&\(E(\theta)\)&\(p(\theta|y)\)&\(E(\theta|y)\)\\
+\hline
+\(Beta(1,1)\)&\(1/2\)&\(Beta(31,61)\)&\(31/92\)\\
+\(Beta(0.5,0.5)\)&\(1/2\)&\(Beta(30.5,60.5)\)&\(61/182\)\\
+\(Beta(0,0)\)&undefined&\(Beta(30,60)\)&\(1/3\)\\
+\hline
+\end{tabular}
+
+In all cases, the \(Beta(0,0)\) prior leads to a posterior mean that
+agrees with the maximum likelihood estimate that would be computed
+from the data alone. Increasing \(\alpha\) and \(\beta\) pulls the
+posterior mean toward the prior mean. Observing more data results in
+the data dominating, with all three posterior means being close to
+\(1/3\) when 90 trials are observed.
 
 \end{enumerate}
 
@@ -277,6 +860,16 @@ so as \(\theta\) increases, each exponent approaches 0 and thus
 \begin{enumerate}
 
 \item Ask a question
+
+\item Design a study/experiment
+
+\item Collect data
+
+\item Analyze data
+
+\item Make conclusions
+
+\item Publish conclusions
 
 \end{enumerate}
 
