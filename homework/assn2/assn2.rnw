@@ -33,25 +33,168 @@ which are ``nonnegative, additive over mutually exclusive outcomes, and
 sum to 1 over all possible mutually exclusive outcomes'' (BDA3,
 \S 1.5, p.~11).
 
-\item
+\item People tend to use probability to describe their level of certainty
+about an outcome. Common uses that most people are exposed to include
+the probability of winning a sweepstakes or the chance that it will rain
+tomorrow. People don't generally think of a 1 in 250 chance of winning
+a drawing as ``if I entered a drawing like this 250 times I should
+expect to win once,'' they interpret is as ``I am almost certainly
+not going to win.''
 
 \end{itemize}
 
-\item
+\item Jordan's criticism (which he found in the Wikipedia article about
+the likelihood principle) was that the likelihood principle ignores the
+context of the data. It implies that identical data should lead to the
+same conclusions, but this is not always appropriate.
 
-\item
+Suppose we are have a coin that we suspect is weighted to come up heads
+more often than tails. We a null hypothesis that
+\(\theta=Pr(\text{heads})<=0.5\) and we seek evidence that
+\(\theta>0.5\). We could devise two different experiments to test
+these hypotheses:
 
-\item
+\begin{enumerate}
 
-\item
+\item Flip the coin 6 times and record \(y\), the number of heads
+that appear. The model is \(y\sim Binom(6, \theta)\) with mass function
+\begin{align*}
+p(y|\theta)=\begin{pmatrix}6\\y\end{pmatrix}\theta^y(1-\theta)^{6-y};
+y=0, 1, 2, 3, 4, 5, 6; 0<\theta<1\text{.}
+\end{align*}
+
+\item Flip the coin until a tails appears and record \(x\), the number
+of heads that appear before the first tails. This model is
+\(x\sim NBinom(1, \theta)\) and the probability mass function is
+\begin{align*}
+p(x|\theta)=\begin{pmatrix}x\\0\end{pmatrix}\theta^x(1-\theta);
+x=0, 1, 2, 3,\dots; 0<\theta<1\text{.}
+\end{align*}
+
+\end{enumerate}
+
+In each experiment, we could observe 5 heads and 1 tails. In this case,
+the likelihood function for (a) would be
+\begin{align*}
+L(\theta|y=5)=6\theta^5(1-\theta)
+\end{align*}
+and the likelihood function for (b) would be
+\begin{align*}
+L(\theta|x=5)=\theta^5(1-\theta)\text{.}
+\end{align*}
+Since these are proportional to each other, they both result in the same
+maximum likelihood point estimate, \(\hat\theta=\dfrac{5}{6}\).
+
+If we compute p-values from the randomization distribution, we get
+\begin{align*}
+Pr(y\geq 5|p=0.5)=0.1094
+\end{align*}
+and
+\begin{align*}
+Pr(x\geq 5|p=0.5)=0.03125\text{.}
+\end{align*}
+The first result is, at best, very weak evidence that the coin is biased
+toward heads. The second is strong evidence of a bias towards heads. The
+difference comes from the design of the experiments -- In the first
+experiment, the tails could occur anywhere in the sequence of coin flips.
+In the second, the tails must appear after a run of 5 heads, a much less
+probable event. Strict adherence to the likelihood principle ignores the
+different ways that data can arise.
+
+One could counter this argument by pointing out that the sampling
+distribution of \(\hat{p}\) differs between the two experiments.
+The estimate from (a) is more variable than the estimate from (b).
+Additionally, the likelihoods are not identical because they differ by
+a factor of 6. However, this is problematic when Bayesian methods are
+used because this factor will disappear when inverting to find the
+posterior distribution. A Bayesian analysis of these experiments
+using the same prior distributions would result in identical posterior
+distributions and thus incorrectly lead to the same conclusions.
+
+\item A likelihood function tells us what parameter values are reasonable,
+given the single dataset at hand. Since the data vary from sample
+to sample, any method of finding a point estimate is expected to give
+different results from different samples. The estimates will deviate
+from the true parameter value, occasionally having a very large
+deviation. (I think my plots for problem 10 illustrate this well.)
+However, when the sample size is large the maximum likelihood estimator
+has a distribution that is approximately normal with a mean equal to
+the value of the parameter. This property of having a friendly
+sampling distribution makes maximizing the likelihood a reasonble
+thing to do when faced with sampling variability.
+
+\item A likelihood function is a relative measurement of how well
+a stated value fits with the specific set of data that were observed.
+
+For example, suppose we have an urn that we know contains 12 marbles,
+and we want to estimate how many of the marbles are gold without
+pouring out all of the marbles. We could randomly draw a few of the
+marbles and count how many of these that are gold. We'll use \(x\) to
+denote the number of gold marbles the we drew, and we'll call the total
+number of gold marbles \(\theta\).
+
+Let's say we choose 5 marbles, and 1 is gold. If we knew that there
+were a total of 2 gold marbles, we could find the probability
+\(Pr(x|\theta=2)\) of choosing any number of gold marbles. It
+turns out that \(Pr(x=1|\theta=2)=0.53\). If we knew that the total
+number of gold marbles was 3, we could do the same thing and find
+that \(Pr(x=1|\theta=3)=0.48\). This means that a the claim that
+there are 2 gold marbles fits with our observation better than
+the claim that there are 3 gold marbles.
+
+The numbers 0.53 and 0.48 are values of the likelihood function.
+We represent it as \(L(\theta|x)\) to emphasize that is comparing
+possible values of \(\theta\); the value of \(x\) is fixed to be
+what was observed. It seems reasonable to use the \(\theta\) with
+the largest likelihood value as our estimate, but we may not always
+be correct. To get a better sense of what our estimate should be, we
+can consider this estimate probabilistically. Values of the likelihood
+are not probabilities (notice that \(0.53+0.48>1\), and any number
+\(\theta\) bigger than the observed \(x\) could be possible), but
+we can theoretically find the distribution of the values this estimate
+could take for our given \(x\).
+
+\item Wilson's example was that, in a study meant to estimate the
+survival rate of ducklings, 24 ducklings were observed and all 24
+survived until the conclusion of the study. As a result, the estimated
+survival rate is \(\hat{p}=1\) with a standard error of 0. This
+represents a failure the frequentist paradigm that can easily be
+remedied in a Bayesian setting.
+
+The fully data-driven analysis does not reflect all available information.
+The frequentist analysis leads to the conclusion that the proportion of
+ducklings who survive is exactly 1. However, any reasonable person knows
+that ducks are not immortal and indestructible; their survival rate in
+any length of time is less than 1. Even if the study period was too short
+for the expected number of deaths in a group of 24 ducklings to exceed 1,
+the researchers had a reason to be investigating the survival rate. This
+indicates the existence of a priori knowledge that not all of the
+ducklings should survive.
+
+Such an error would not occur so easily if Bayesian methods were used.
+The Bayesian model would incorporate the prior knowledge that the survival
+rate must be strictly less than 1. In the absence of any specific
+information about what the rate might be, the analysis could still be
+performed. The result would be more precise, updated knowledge about
+the rate of survival for the ducks under the study conditions.
+
+Frequentists would counter that their methods are accurate in the long
+run and bound to lead to false conclusions a small proportion of the
+time. It is unnecessarily limiting to require that this one study must
+only be considered in the context of many repetitions of identical studies.
+Bayesian methods provide a formal way to combine existing knowledge with
+the data at hand and discuss certainty, not error rates. The individual
+study is allowed to have merit.
 
 \item Below are several beta density curves with \(\alpha=\beta\). When
 \(\alpha\neq\beta\), increasing \(\alpha\) increases left-skew and
 increasing \(\beta\) increases right-skew.
 
+\begin{center}
 <<betas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 curve(dbeta(x, 0.05, 0.05), xlim = c(0, 1), ylim = c(0, 3), lty = 1,
-      main = 'Several Beta Densities', ylab = 'Density', add = FALSE)
+      main = 'Several Beta Densities', xlab = expression(theta),
+      ylab = expression(p(theta)), add = FALSE)
 curve(dbeta(x, 0.8, 0.8), lty = 2, add = TRUE)
 curve(dbeta(x, 1, 1), lty = 3, add = TRUE)
 curve(dbeta(x, 5, 5), lty = 6, add = TRUE)
@@ -61,6 +204,7 @@ legend('topright', c(expression({alpha==beta}==0.05),
                       expression({alpha==beta}==5)),
        lty = c(1, 2, 3, 6))
 @
+\end{center}
 
 \item I had not realized that R's default parameterization for the
 Gamma distribution uses a rate parameter instead of a scale parameter.
@@ -69,10 +213,11 @@ rate parameter is called an inverse scale parameter). It makes me wonder
 how many times I've incorrectly used a parameterization that I did not
 intend to use. I've plotted several gamma density curves below.
 
+\begin{center}
 <<gammas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 curve(dgamma(x, 0.5, 0.5), xlim = c(0, 6), ylim = c(0, 1.5), lty = 1,
-      lwd = 2,       main = 'Several Gamma Densities', ylab = 'Density',
-      add = FALSE)
+      lwd = 2, main = 'Several Gamma Densities', xlab = expression(theta),
+      ylab = expression(p(theta)), add = FALSE)
 curve(dgamma(x, 1, 1), lty = 2, add = TRUE)
 curve(dgamma(x, 4, rate = 4), lty = 3, add = TRUE)
 curve(dgamma(x, 8, rate = 8), lty = 6, add = TRUE)
@@ -82,6 +227,7 @@ legend('topright', c(expression({alpha==beta}==0.5),
                       expression({alpha==beta}==8)),
        lty = c(1, 2, 3, 6))
 @
+\end{center}
 
 The inverse scale parameterization of the Gamma distribution forms a
 conjugate prior when used to model Poisson rates and Normal precisions
@@ -138,13 +284,15 @@ for the second doctor's prior. These have similar variances (0.00116
 and 0.00127) and their means agree with the doctors' opinions. The
 densities are plotted below.
 
+\begin{center}
 <<docbetas,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
-curve(dbeta(x, 2, 38), from = 0, to = 1, lty = 1,
+curve(dbeta(x, 2, 38), from = 0, to = 0.5, lty = 1, xlab = expression(theta),
       ylab = expression(p(theta)), main = 'Comparison of Doctors\' Priors')
 curve(dbeta(x, 7, 63), lty = 2, add = TRUE)
 legend('topright', lty = 1:2, legend = c(expression(E(theta)==0.05),
                                          expression(E(theta)==0.10)))
 @
+\end{center}
 
 If I knew something about how the doctors formed their opinions  I
 might choose priors to reflect that, but since I do not have that
@@ -207,9 +355,12 @@ print(xtable(rbind(c(summary(obsP1),
                      'Var.' = var(obsP1))[c(4, 7, 1, 2, 3, 5, 6)])),
       floating = FALSE, include.rownames = FALSE)
 cat('\n\nMaximum Likelihood Estimate: \\(\\hat{\\lambda}=\\bar y\\) = ',
-    lambdaMLE1, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', lambdaSE1,
+    lambdaMLE1, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', round(lambdaSE1, 3),
     '\n\n', sep = '')
 
+@
+\begin{center}
+<<pois1b,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 # Likelihood function
 # Assume theta and data are vectors
 Lpois <- function(theta, data){
@@ -223,7 +374,7 @@ Lpois <- function(theta, data){
 }
 
 # Plot the likelihood
-curve(Lpois(x, obsP1), from = 3, to = 7, yaxt = 'n',
+curve(Lpois(x, obsP1), from = 3, to = 7, ylim = c(0, 1.7e-20), yaxt = 'n',
       main = expression(paste('Likelihood for ', lambda)),
       xlab = expression(lambda),
       ylab = expression(paste('L(', lambda, '|y)')))
@@ -246,6 +397,7 @@ legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
                   'Maximum likelihood estimate',
                   '95% Normal confidence bounds'))
 @
+\end{center}
 
 \item 100 observations from \(Poisson(\lambda=5)\):\vspace{5pt}
 
@@ -264,9 +416,12 @@ print(xtable(rbind(c(summary(obsP2),
                      'Var.' = var(obsP2))[c(4, 7, 1, 2, 3, 5, 6)])),
       floating = FALSE, include.rownames = FALSE)
 cat('\n\nMaximum Likelihood Estimate: \\(\\hat{\\lambda}=\\bar y\\) = ',
-    lambdaMLE2, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', lambdaSE2,
+    lambdaMLE2, ', SE: \\(\\dfrac{s}{\\sqrt{n}}\\) = ', round(lambdaSE2, 3),
     '\n\n', sep = '')
 
+@
+\begin{center}
+<<pois2b,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 # Likelihood function
 # Assume theta and data are vectors
 #Lpois <- function(theta, data){
@@ -280,7 +435,7 @@ cat('\n\nMaximum Likelihood Estimate: \\(\\hat{\\lambda}=\\bar y\\) = ',
 #}
 
 # Plot the likelihood
-curve(Lpois(x, obsP2), from = 3, to = 7, yaxt = 'n',
+curve(Lpois(x, obsP2), from = 3, to = 7, ylim = c(0, 5.3e-93), yaxt = 'n',
       main = expression(paste('Likelihood for ', lambda)),
       xlab = expression(lambda),
       ylab = expression(paste('L(', lambda, '|y)')))
@@ -303,6 +458,7 @@ legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
                   'Maximum likelihood estimate',
                   '95% Normal confidence bounds'))
 @
+\end{center}
 
 \item 15 observations from \(N(\mu=10, \sigma^2=5)\):\vspace{5pt}
 
@@ -323,10 +479,10 @@ sigmasqMLE1 <- var(obsN1) * 14 / 15
 print(xtable(rbind(c(summary(obsN1),
                      'Var.' = var(obsN1))[c(4, 7, 1, 2, 3, 5, 6)])),
       floating = FALSE, include.rownames = FALSE)
-cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', muMLE1,
-    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', muSE1,
+cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', round(muMLE1, 2),
+    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', round(muSE1, 3),
     ', \\(\\hat{\\sigma}^2=\\dfrac{\\sum (y_i-\\bar{y})^2}{n}\\) = ',
-    sigmasqMLE1, '\n\n', sep = '')
+    round(sigmasqMLE1, 3), '\n\n', sep = '')
 @
 \begin{center}
 <<norm1b,echo=FALSE,cache=TRUE,out.width='0.6\\linewidth',fig.width=6>>=
@@ -351,11 +507,12 @@ logLs <- logLnorm(thetas, obsN1)
 contour(x = mus, y = sigmas,
         z = exp(matrix(logLs, nrow = length(mus))), nlevels = 20,
         main = expression(paste('Likelihood for ', mu, ' and ', sigma^2)),
-        xlab = expression(mu), ylab = expression(sigma^2))
+        xlab = expression(mu), ylab = expression(sigma^2),
+        drawlabels = FALSE)
 
 # True value and MLE
 points(x = c(10, muMLE1), y = c(5, sigmasqMLE1),
-       pch = 19, col = c('red', 'black'))
+       pch = c(19, 20), col = c('red', 'black'))
 
 # Confidence bounds
 ml <- muMLE1 + qt(0.025, 14) * muSE1
@@ -368,8 +525,8 @@ segments(x0 = ml, y0 = su, x1 = mu, lty = 3)
 segments(x0 = ml, y0 = sl, y1 = su, lty = 3)
 
 # Label it!
-legend('topright', col = c('red', 'black', 'black'),
-       pch = c(19, 19, NA), lty = c(NA, NA, 3),
+legend('topright', bg = 'white', col = c('red', 'black', 'black'),
+       pch = c(19, 20, NA), lty = c(NA, NA, 3),
        legend = c('True parameter value',
                   'Maximum likelihood estimate',
                   '95% confidence rectangle'))
@@ -377,7 +534,7 @@ legend('topright', col = c('red', 'black', 'black'),
 \end{center}
 
 The confidence bounds are based on
-\(\dfrac{\bar{y}-\mu}{s/sqrt{n}}\sim t_{14}\)
+\(\dfrac{\bar{y}-\mu}{s/\sqrt{n}}\sim t_{14}\)
 and \(\dfrac{n\hat{\sigma}^2}{\sigma^2}\sim\chi^2_{14}\).
 
 \item 5 observations from \(N(\mu=10, \sigma^2=5)\):\vspace{5pt}
@@ -399,10 +556,10 @@ sigmasqMLE2 <- var(obsN2) * 4 / 5
 print(xtable(rbind(c(summary(obsN2),
                      'Var.' = var(obsN2))[c(4, 7, 1, 2, 3, 5, 6)])),
       floating = FALSE, include.rownames = FALSE)
-cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', muMLE2,
-    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', muSE2,
+cat('\n\nMLEs: \\(\\hat{\\mu}=\\bar y\\) = ', round(muMLE2, 2),
+    ', \\(SE(\\bar{y})=\\dfrac{s}{\\sqrt{n}}\\) = ', round(muSE2, 3),
     ', \\(\\hat{\\sigma}^2=\\dfrac{\\sum (y_i-\\bar{y})^2}{n}\\) = ',
-    sigmasqMLE2, '\n\n', sep = '')
+    round(sigmasqMLE2, 3), '\n\n', sep = '')
 @
 \begin{center}
 <<norm2b,echo=FALSE,cache=TRUE,out.width='0.6\\linewidth',fig.width=6>>=
@@ -424,11 +581,12 @@ logLs <- logLnorm(thetas, obsN2)
 contour(x = mus, y = sigmas,
         z = exp(matrix(logLs, nrow = length(mus))), nlevels = 20,
         main = expression(paste('Likelihood for ', mu, ' and ', sigma^2)),
-        xlab = expression(mu), ylab = expression(sigma^2))
+        xlab = expression(mu), ylab = expression(sigma^2),
+        drawlabels = FALSE)
 
 # True value and MLE
 points(x = c(10, muMLE2), y = c(5, sigmasqMLE2),
-       pch = 19, col = c('red', 'black'))
+       pch = c(19, 20), col = c('red', 'black'))
 
 # Confidence bounds
 ml <- muMLE2 + qt(0.025, 4) * muSE2
@@ -441,8 +599,8 @@ segments(x0 = ml, y0 = su, x1 = mu, lty = 3)
 segments(x0 = ml, y0 = sl, y1 = su, lty = 3)
 
 # Label it!
-legend('topright', col = c('red', 'black', 'black'),
-       pch = c(19, 19, NA), lty = c(NA, NA, 3),
+legend('topright', bg = 'white', col = c('red', 'black', 'black'),
+       pch = c(19, 20, NA), lty = c(NA, NA, 3),
        legend = c('True parameter value',
                   'Maximum likelihood estimate',
                   '95% confidence rectangle'))
@@ -469,8 +627,10 @@ pSE1 <- sqrt(pMLE1 * (1 - pMLE1)) / 10
 cat('Observed \\(y\\) = ', obsB1, ' successes in \\(m=100\\) trials',
     '\n\nMaximum Likelihood Estimate: \\(\\hat{p}=\\dfrac{y}{m}\\) = ',
     pMLE1, ', SE: \\(\\sqrt{\\dfrac{\\hat{p}(1-\\hat{p})}{n}}\\) = ',
-    pSE1, '\n\n', sep = '')
-
+    round(pSE1, 5), '\n\n', sep = '')
+@
+\begin{center}
+<<bin1b,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 # Likelihood function
 # Assume theta and data are vectors
 Lbinom <- function(theta, data, m){
@@ -484,9 +644,8 @@ Lbinom <- function(theta, data, m){
 }
 
 # Plot the likelihood
-curve(Lbinom(x, obsB1, 100), from = 0.05, to = 0.35, yaxt = 'n',
-      main = 'Likelihood for p', xlab = 'p',
-      ylab = 'L(p|y)')
+curve(Lbinom(x, obsB1, 100), from = 0.05, to = 0.35, ylim = c(0, 0.13),
+      yaxt = 'n', main = 'Likelihood for p', xlab = 'p', ylab = 'L(p|y)')
 
 # True value
 segments(x0 = 0.2, y0 = 0, y1 = Lbinom(0.2, obsB1, 100), lty = 2, col = 'red')
@@ -506,6 +665,7 @@ legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
                   'Maximum likelihood estimate',
                   '95% Normal confidence bounds'))
 @
+\end{center}
 
 \item 30 observations from \(Binomial(m=100, p=0.2)\):\vspace{5pt}
 
@@ -525,10 +685,12 @@ print(xtable(rbind(c(summary(obsB2),
       floating = FALSE, include.rownames = FALSE)
 cat('\n\nObserved \\(\\sum y_i\\) = ', sum(obsB2),
     ' successes in \\(nm=3000\\) trials\n\nMaximum Likelihood Estimate: ',
-    '\\(\\hat{p}=\\dfrac{\\sum y_i}{nm}\\) = ', pMLE2,
+    '\\(\\hat{p}=\\dfrac{\\sum y_i}{nm}\\) = ', round(pMLE2, 3),
     ', SE: \\(\\sqrt{\\dfrac{\\hat{p}(1-\\hat{p})}{nm}}\\) = ',
-    pSE2, '\n\n', sep = '')
-
+    round(pSE2, 5), '\n\n', sep = '')
+@
+\begin{center}
+<<bin2b,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
 # Likelihood function
 # Assume theta and data are vectors
 #Lbinom <- function(theta, data, m){
@@ -542,9 +704,9 @@ cat('\n\nObserved \\(\\sum y_i\\) = ', sum(obsB2),
 #}
 
 # Plot the likelihood
-curve(Lbinom(x, obsB2, 100), from = 0.05, to = 0.35, yaxt = 'n', n = 201,
-      main = 'Likelihood for p', xlab = 'p',
-      ylab = 'L(p|y)')
+curve(Lbinom(x, obsB2, 100), from = 0.05, to = 0.35, ylim = c(0, 9e-39),
+      yaxt = 'n', n = 201, main = 'Likelihood for p',
+      xlab = 'p', ylab = 'L(p|y)')
 
 # True value
 segments(x0 = 0.2, y0 = 0, y1 = Lbinom(0.2, obsB2, 100), lty = 2, col = 'red')
@@ -564,8 +726,19 @@ legend('topright', col = c('red', 'black', 'black'), lty = c(2, 1, 3),
                   'Maximum likelihood estimate',
                   '95% Normal confidence bounds'))
 @
+\end{center}
 
-\item
+\item The plots show very nicely how larger sample sizes lead to more
+precise inferences, as the likelihoods are much narrower for the larger
+samples. I plotted the pairs on the same scale to emphasize this.
+
+It is also interesting to observe that the true parameter can have a
+noticeably lower likelihood than the MLE due to sampling variability
+(especially noticeable in part (a)). Another thing to note is that the
+likelihood is not constant on the boundaries of the usual frequentist
+confidence sets. These are constructed to be accurate through repeated
+sampling, not to have endpoints that are equally ``likely'' given one
+data set.
 
 \end{enumerate}
 
@@ -670,7 +843,7 @@ the probability \(P_A(\text{Brazil wins the World Cup})=\dfrac{1}{209}\).
 An avid follower like \(B\) would adjust the probability based on
 observed information about the players and the outcomes of matches
 in the qualifying round, as well as on the structure of the
-qualifing tournament. Perhaps, based on the historical record, \(B\)
+qualifying tournament. Perhaps, based on the historical record, \(B\)
 would assume that Brazil is guaranteed to be one of the 32 teams that
 qualify for the World Cup and has a better chance of winning than some
 other qualifying teams, and then assign a probability of
@@ -709,7 +882,7 @@ so
 \text{.}
 \end{align*}
 If \(\dfrac{\alpha}{\alpha+\beta}>\dfrac{y}{n}\), the same steps
-(with the directions of the inequalities reversed) will estiablish
+(with the directions of the inequalities reversed) will establish
 \begin{align*}
 \frac{\alpha}{\alpha+\beta}>\frac{\alpha+y}{\alpha+\beta+n}>\frac{y}{n}
 \text{.}
@@ -789,12 +962,12 @@ p(\theta)\propto\left(J(\theta)\right)^\frac{1}{2}
 \end{align*}
 and so \(\theta\sim Beta\left(\frac{1}{2},1\right)\).
 
-The \(Gamma\left(\frac{1}{2},1\right)\) density seems to be a close
+The \(Gamma\left(\frac{1}{2},1\right)\) density looks to be a close
 match for small \(\theta\).
 
 \begin{center}
 <<betagamma,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
-curve(dbeta(x, 0.5, 1), from = 0, to = 1,
+curve(dbeta(x, 0.5, 1), from = 0, to = 1, ylim = c(0, 5),
       xlab = expression(theta), ylab = expression(p(theta)),
       main = 'Comparison of Beta(1/2, 1) and Gamma(1/2, 1) Densities')
 curve(dgamma(x, 0.5, 1), lty = 2, add = TRUE)
@@ -855,21 +1028,52 @@ the data dominating, with all three posterior means being close to
 
 \end{enumerate}
 
-\item Steps of Statistical Inference:
+\item Subjectivity refers to ideas that are shaped by the individual's
+experiences and can vary from person to person. Objectivity refers to
+ideas based on observable fact that everyone should be able to agree
+upon. I see these concepts relating to the steps of Statistical
+Inference in the following ways:
 
 \begin{enumerate}
 
-\item Ask a question
+\item Ask a question -- Subjective
+The question that a particular researcher asks would depend on that
+researcher's previous experiences. A researcher observing starving polar
+bears who have lost their habitat due to thinning ice might ask if
+the mean weight of adult polar bears is below a certain values. A
+researcher who works with well-off polar bears in the vicinity of a
+particular Canadian island might ask if the mean weight of adult
+bears is above a certain value. Both researchers may be interested
+in collecting data from a larger population of bears.
 
-\item Design a study/experiment
+\item Design a study/experiment -- Objective
+I see the design step as mostly objective since statisticians tend
+to agree the properties of a good design, and these conclusions are
+supported by mathematical results. Some subjectivity may appear through
+the reckless (mis)use of prior distributions.
 
-\item Collect data
+\item Collect data -- Objective
+A solid design should include an unbiased sampling plan. I see data
+collection as objective as so long as the sampling scheme was clearly
+defined in the previous step. However, a poorly defined sampling plan,
+such using several ill-trained volunteers to stand at different
+locations around the MSU campus and conduct a survey, could introduce
+the volunteers' subjective opinions about who should be in the sample.
 
-\item Analyze data
+\item Analyze data and make conclusions -- Subjective
+The analysis component should be objective as far as the methods are
+concerned, since they are mainly mathematical. However, people often
+disagree on how to interpret results, how and when to trim terms from
+models, and what to do about outliers.
 
-\item Make conclusions
-
-\item Publish conclusions
+\item Publish conclusions -- Subjective
+Even in academia, unexpected or exciting conclusions are published
+disproportionately more often than results with that confirm existing
+ideas. This is exacerbated when the popular press focuses on new and
+surprising scientific results without considering the journey that
+the information took to get published, or the merits of the journal
+(or blog!) where it appeared. The results that a person is exposed
+to are determined by where that person seeks news and information.
 
 \end{enumerate}
 
