@@ -1,0 +1,1742 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+\usepackage{graphicx}
+\usepackage{lscape}
+\usepackage[nottoc,numbib]{tocbibind}
+\setlength{\parskip}{5.5pt}
+\setlength{\parindent}{0pt}
+
+\usepackage{enumitem}
+\setlist{parsep=5.5pt}
+\setlist{nolistsep}
+
+\usepackage{float}
+\usepackage{amsmath}
+
+\title{Stat 532 Final Project: Modeling an Oil Field Discovery Process}
+\author{Kenny Flagg}
+\date{December 4, 2015}
+
+<<setup,echo=FALSE,message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 3,
+               out.width = '\\linewidth', out.height = '0.3\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+#require(LearnBayes)
+#require(rstan)
+#rstan_options(auto_write = TRUE)
+#options(mc.cores = parallel::detectCores())
+
+#logit <- function(x){return(log(x/(1-x)))}
+#expit <- function(x){return(1/(1+exp(-x)))}
+
+#extract <- function(x, ...) UseMethod('extract')
+#extract.mcmc.list <- function(x, pars){
+#  draws <- lapply(pars, function(i){unlist(x[,i])})
+#  names(draws) <- pars
+#  return(draws)
+#}
+#require(R2jags)
+@
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\pagebreak
+
+\section{Introduction}
+
+The locations and sizes of petroleum fields are valuable pieces of
+information in today's economy. One statistical approach to investigating
+the amount of oil in a region is to consider the process of finding oil
+fields as taking a random sample of the fields in a region where larger
+fields have higher probabilities of being sampled than smaller fields.
+Sinding-Larsen and Xu~\cite{disc} used an empirical Bayes model of the
+oil field discovery process to study the distribution of undiscovered
+oil reservoirs in the Halten Terrace, off the shore of Norway. The primary
+research questions were as follows.
+\begin{enumerate}
+\item How many undiscovered oil fields exist in the region?
+\item What is the total volume of petroleum present in the
+undiscovered fields?
+\end{enumerate}
+The data consist of estimated sizes in millions of cubic meters of all 22
+known petroleum reservoirs in the region, ranked in the order in which
+they were discovered (Figure~\ref{realdataplot} and Table~\ref{realdatatab}).
+
+The Halten Terrace contains a play, or collection of petroleum fields and
+prospective petroleum fields that share the same geological
+circumstances~\cite[p.~106]{play}. It is comprised of two sub-plays
+(Figure~\ref{map}). The western sub-play is overpressured, meaning that
+oil fields there are under high pressure and so exploratory drilling is
+considered high-risk. The eastern sub-play is considered to
+be normally pressured. More detailed geological information
+is available in Koch and Heum~\cite{hist}.
+
+The discovery process model was previously applied to the eastern sub-play
+of the Halten Terrace by Sinding-Larsen and Chen~\cite{prev}. Since then,
+the western sub-play has been more thoroughly explored and the size estimates
+for the previously known fields have been revised. The previous analysis
+was done using maximum likelihood estimation, and it was concluded
+that it was difficult to find estimates when the total number of fields
+was unknown. Sinding-Larsen and Xu were interested in repeating the
+analysis with the more recent data and incorporating expert knowledge
+about the total number of fields. They fit the discovery process model
+to a combined dataset where the entire region was treated as a single play,
+and they also fit the model separately to each sub-play. Their discussion
+emphasized results from the combined data.
+
+In this project, I evaluated the discovery process model on simulated
+data using both the empirical Bayes priors of Sinding-Larsen and Xu and my
+own less-informative priors. I then repeated the analysis on the combined
+Halten Terrace data comparing both sets of priors.
+
+<<realdata1,echo=FALSE,cache=TRUE>>=
+halten <- data.frame('Name' = c('Midtgard',
+                                 'Tyrihans S',
+                                 'Tyrihans N',
+                                 'Smoerbukk',
+                                 'Heidrun',
+                                 'Smoebukk S',
+                                 'Njord',
+                                 'Mikkel',
+                                 'Trestakk',
+                                 'Alve',
+                                 '6507/8-4',
+                                 '6407/8-2',
+                                 'Lavrans',
+                                 'Kristin',
+                                 'Ragnfrid',
+                                 'Sharv',
+                                 'Erled',
+                                 '6407/9-9',
+                                 '6507/7-6',
+                                 '6407/7-6',
+                                 '6506/6-1',
+                                 'Svale'),
+                     'Order' = 1:22,
+                     'Size00' = c(113.20,
+                                   22.6,
+                                   26.3,
+                                  158.5,
+                                  125.1,
+                                   67.3,
+                                   42.2,
+                                   33.63,
+                                    7,
+                                   18.5,
+                                    3,
+                                    1.8,
+                                   44.2,
+                                   92,
+                                   10.7,
+                                   60.27,
+                                   10.4,
+                                    2.1,
+                                   18,
+                                    2,
+                                   93.2,
+                                   10.1),
+                     'Size92' = c(101,
+                                   15.5,
+                                   18.9,
+                                  125.3,
+                                  109.4,
+                                   49.7,
+                                   36,
+                                   21.1,
+                                    3.9,
+                                      NA,
+                                   20.4,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA,
+                                      NA),
+                     'Zone' = c(1,
+                                1,
+                                1,
+                                1,
+                                1,
+                                1,
+                                1,
+                                1,
+                                1,
+                                2,
+                                1,
+                                1,
+                                1,
+                                2,
+                                2,
+                                2,
+                                2,
+                                1,
+                                2,
+                                1,
+                                2,
+                                2))
+@
+
+\begin{figure}[H]
+<<realdata3,echo=FALSE,results='asis',cache=TRUE,dependson='realdata2'>>=
+par(mar = c(4.1, 4.1, 2.1, 1.1))
+plot(Size00 ~ Order, xlim = c(1, 22), ylim = c(0.5, 1500), log = 'y',
+     xaxt = 'n', yaxt = 'n', type = 'o', data = halten,
+     main = 'Size-Rank Plot of the Halten Terrace Discoveries',
+     xlab = 'Discovery Order', ylab = 'Size (millions of cubic meters)',
+     pch = 21+3*(Zone-1), col = 'black', bg = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+legend('topright', col = 'black', pt.bg = 'black', pch = c(21, 24),
+       legend = c('Normal Pressure Zone', 'Overpressured Zone'))
+@
+\caption{Plot of the sizes versus discovery order of the 22 fields
+discovered in the Halten Terrance as of 2000.}
+\label{realdataplot}
+\end{figure}
+
+\begin{landscape}
+\begin{minipage}{0.667\linewidth}\vspace{0.5in}
+\begin{table}[H]{\footnotesize
+<<realdata2,echo=FALSE,results='asis',cache=TRUE,dependson='realdata1'>>=
+halten.nicenames <- halten
+halten.nicenames$Zone <- c('Normal Pressure', 'Overpressured')[halten$Zone]
+colnames(halten.nicenames) <- c('Field Name', 'Discovery Order',
+                      'Size (2000 estimate)', 'Size (1992 estimate)',
+                      'Pressure Zone')
+print(xtable(halten.nicenames), include.rownames = FALSE, floating = FALSE)
+@
+}\caption{Estimated sizes of discovered oil fields in the Halten Terrance.}
+\label{realdatatab}
+\end{table}
+\end{minipage}\begin{minipage}{0.333\linewidth}\vspace{0.75in}
+\begin{figure}[H]\begin{center}
+\includegraphics[width=\linewidth]{haltenmap}
+\caption{Map of Halten Terrace discoveries and pressure zones from
+Sinding-Larsen and Xu~\cite{disc}.}
+\label{map}
+\end{center}\end{figure}
+\end{minipage}
+\end{landscape}
+
+\section{Model}
+
+The discovery process model assumes that the sizes of the oil fields in a play
+come from a common lognormal population, and that the discovered fields are
+a random sample drawn without replacement from that population. The
+probability of including a field in the sample is assumed to be proportional
+to the field's volume raised to a power.
+
+Let \(N\) be the unknown number of fields in the play, and let \(n\)
+be the number of fields that have been discovered. The volumes of the
+discovered fields are denoted \(Y_j\), \(j=1,\dots,n\) and the volumes of
+the undiscovered fields are denoted \(S_k\), \(k=n+1,\dots,N\). These values
+share the distribution
+\begin{equation*}
+\log(Y_j),\log(S_k)\sim\mathrm{N}(\mu,\sigma^2)
+\end{equation*}
+where \(\mu\) and \(\sigma^2\) are the unknown mean and variance of the
+log-sizes.
+
+The probability of selecting the sample \((Y_1,\dots,Y_n)\) from the
+population \((Y_1,\dots,Y_n,S_{n+1},\dots,S_N)\) is
+\begin{equation*}
+\begin{pmatrix}N \\ n\end{pmatrix}\prod_{i=1}^n\left(\frac{Y_i^\beta}
+{\sum_{j=i}^nY_j^\beta+\sum_{k=n+1}^NS_k^\beta}\right)
+\end{equation*}
+where \(\beta\) is an unknown quantity known as the size-bias parameter.
+
+Let \(\mathrm{logN}(X|\mu,\sigma^2)\) denote the density function of a
+lognormal random variable \(X\) with \(E(\log(X))=\mu\) and
+\(Var(\log(X))=\sigma^2\). Then the joint distribution of the \(Y_j\),
+the \(S_k\), and the parameters is
+\begin{multline*}
+p(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N,Y_1,\dots,Y_n)
+=p(N,\beta,\mu,\sigma^2)p(S_{n+1},\dots,S_N|N,\mu,\sigma^2)\\
+\times p(Y_1,\dots,Y_n|N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)
+\end{multline*}
+where \(p(N,\beta,\mu,\sigma^2)\) is the joint prior distribution of the
+parameters,
+\begin{equation*}
+p(S_{n+1},\dots,S_N|N,\mu,\sigma^2)
+=\prod_{k=n+1}^N\mathrm{logN}(S_k|\mu,\sigma^2)
+\end{equation*}
+is the joint distribution of the unobserved field sizes, and
+\begin{equation*}
+p(Y_1,\dots,Y_n|N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)
+=\begin{pmatrix}N \\ n\end{pmatrix}\prod_{i=1}^n\left(\frac{Y_i^\beta}
+{\sum_{j=i}^nY_j^\beta+\sum_{k=n+1}^NS_k^\beta}
+\mathrm{logN}(\mu,\sigma^2)\right)
+\end{equation*}
+is the likelihood.
+
+\pagebreak
+\subsection{Empirical Bayes Priors Used by Sinding-Larsen and Xu}
+
+Xu and Sinding-Larsen published a companion paper~\cite{prior} giving
+the details of how they chose their prior distributions. They gave
+independent distributions to \(N\), \(\beta\), \(\mu\), and \(\sigma^2\).
+An empirical Bayes approach was used, where the data were used to select
+informative priors.
+
+The prior distributions of \(\mu\) and \(\sigma^2\) were chosen to
+approximate the sampling distributions of the maximum likelihood estimators.
+A Normal distribution with mean 2.38 and variance 0.54 was used for \(\mu\),
+and a Gamma distribution with mean 2.89 and variance 2.13 was selected for
+\(\sigma^2\) (Figure~\ref{theirmusig}).
+
+The prior distribution for \(\beta\) was derived from the empirical equation
+\begin{equation*}
+b=b_0\left(1-e^{-\sigma\beta}\right)
+\end{equation*}
+where \(b\) is the slope of the least-squares line fitting log-size to
+rank in the discovery order and \(b_0\) is the limit of the slope as
+\(\beta\) approaches infinity. A Uniform prior was used for \(b_0\).
+Endpoints of \(-0.213\) and \(-0.088\) were selected by examining the
+size-rank plot and considering possible slopes of a line connecting the
+smallest and largest sizes on the plot. The sampling distribution of
+the least-squares estimator of \(b\) was used as the prior for \(b\), which
+for the Halten Terrace data was estimated as a Normal distribution with
+mean \(-0.0925\) and variance 0.00193. They advised replacing \(\sigma\)
+in the equation with the sample standard deviation of the \(\log(Y_i)\)
+values, in this case 1.41. These distributions, and the resulting
+distribution of \(\beta\), appear in Figure~\ref{theirb}.
+
+The only prior that was not directly based on the data being analyzed was
+the prior for \(N\). This parameter was modeled hierarchically with a
+\(\mathrm{Binomial}(M-n,\pi)\) distribution. The hyperparameter \(M\)
+represents the number of prospective oil fields in the region that could
+ever be explored, and \(\pi\) is the probability that a prospect
+actually contains oil. The prior distribution of \(M\) was constructed
+from percentiles elicited from experts. A \(\mathrm{Beta}(2.3, 4.28)\)
+distribution was used for \(\pi\), chosen by examining historical data
+about the number of prospects being explored at once and the number of
+those that were found to contain petroleum. The prior distributions of
+\(M\), \(\pi\), and \(N\) are plotted in Figure~\ref{theirn}.
+
+<<theirpriors1,echo=FALSE,cache=TRUE>>=
+# KEEP THIS IN THEIRPRIORS1!
+M.prior <- function(M, n){
+  return(ifelse(M-n<13, 0,
+         ifelse(M-n<16, 0.05/3,
+         ifelse(M-n<20, 0.2/4,
+         ifelse(M-n<26, 0.25/6,
+         ifelse(M-n<30, 0.25/4,
+         ifelse(M-n<35, 0.2/5,
+         ifelse(M-n<38, 0.05/3,
+         0))))))))
+}
+M.prior2 <- function(M, n){
+  return(ifelse(M-n>12&M-n<38, 1/25, 0))
+}
+ldlogn <- function(y, mu, sigma){
+  return(dnorm(log(y), mu, sigma, log = TRUE) - log(y))
+}
+loglik <- function(Y, S, mu, sigma, beta, N, n){
+  return(
+    lchoose(N, n) +
+      beta * sum(log(Y)) -
+      sum(log(
+        sapply(1:n, function(i){return(sum(Y[i:n] ^ beta))}) + sum(S ^ beta)
+        )) +
+      sum(ldlogn(Y, mu, sigma))
+    )
+}
+@
+
+<<realdatatheirpriors1,echo=FALSE,cache=TRUE,dependson=c('theirpriors1', 'realdata1')>>=
+set.seed(87624) # Don't use 87625!!!
+num.draws1 <- 500000
+
+# Create a data frame to store all the prior stuff.
+draws1 <- data.frame('mu' = numeric(num.draws1),
+                     'sigsq' = numeric(num.draws1),
+                     'b0' = numeric(num.draws1),
+                     'b' = numeric(num.draws1),
+                     'beta' = numeric(num.draws1),
+                     'M' = numeric(num.draws1),
+                     'p' = numeric(num.draws1),
+                     'N' = numeric(num.draws1),
+                     'maxS' = numeric(num.draws1),
+                     'totS' = numeric(num.draws1),
+                     'lW' = numeric(num.draws1),
+                     'W' = numeric(num.draws1),
+                     'accept' = logical(num.draws1))
+
+# Define number found so far.
+n.found1 <- nrow(halten)
+
+# Draw mu and sigmasq.
+draws1$mu <- rnorm(num.draws1, 2.38, sqrt(0.54))
+draws1$sigsq <- rgamma(num.draws1, 2.89^2/2.13, 2.89/2.13)
+
+# Draw b0.
+draws1$b0 <- runif(num.draws1, -0.213, -0.088)
+
+# Draw b from the asymptotic sampling distribution of the slope of
+# the simple linear regression of log(size) against the  discovery order.
+order1.lm <- lm(log(Size00) ~ Order, data = halten)
+bhat1 <- coef(order1.lm)[2]
+se.bhat1 <- arm::se.coef(order1.lm)[2]
+draws1$b <- rnorm(num.draws1, bhat1, se.bhat1)
+
+# Discard impossible draws of b and b0 and get new ones.
+while(sum(draws1$b<draws1$b0)>0){
+  idx <- draws1$b<draws1$b0
+  num.newdraws <- sum(idx)
+  draws1$b0[idx] <- runif(num.newdraws, -0.213, -0.088)
+  draws1$b[idx] <- rnorm(num.newdraws, bhat1, se.bhat1)
+}
+
+# Compute beta.
+draws1$beta <- -log(1-draws1$b/draws1$b0)/sd(log(halten$Size00))
+
+# Draw M and pi.
+draws1$M <- sample(35:59, size = num.draws1, replace = TRUE,
+                   prob = M.prior(35:59, n.found1))
+draws1$p <- rbeta(num.draws1, 2.3, 4.28)
+
+# Draw N.
+draws1$N <- n.found1 + rbinom(num.draws1, draws1$M-n.found1, draws1$p)
+
+# Draw S.
+S.draws1 <- apply(draws1, 1, function(x){
+    return(exp(rnorm(x['N']-n.found1, x['mu'], sqrt(x['sigsq']))))
+  })
+
+# Compute size of largest undiscovered field.
+draws1$maxS <- sapply(S.draws1, function(x){return(
+    ifelse(length(x)>0, max(x), NA)
+  )})
+
+# Compute total undiscovered volume.
+draws1$totS <- sapply(S.draws1, function(x){return(
+    ifelse(length(x)>0, sum(x), NA)
+  )})
+
+# Weights.
+draws1$lW <- sapply(1:num.draws1,function(x){return(with(draws1,
+    loglik(halten$Size00, S.draws1[[x]],
+           mu[x], sqrt(sigsq[x]), beta[x], N[x], n.found1)
+  ))})
+draws1$W <- exp(draws1$lW - max(draws1$lW))
+
+# Rejection Sampling?
+set.seed(623)
+draws1$accept <- runif(num.draws1) < draws1$W
+@
+
+\begin{figure}[H]
+<<theirpriors2,echo=FALSE,cache=TRUE>>=
+par(mfrow = c(1, 2), mar = c(4.1, 1.1, 2.1, 1.1))
+curve(dnorm(x, 2.38, sqrt(0.54)), from = 0, to = 5,
+      main = expression(bold(N(list(2.38, 0.54))~
+                               'Prior Distribution of'~mu)),
+      xlab = expression(mu), ylab = '', yaxt = 'n', frame.plot = FALSE)
+curve(dgamma(x, 2.89^2/2.13, 2.89/2.13), from = 0, to = 8,
+      main = expression(bold(G*amma(list(mean==2.89, var==2.13))~
+                               'Prior Distribution of'~sigma^2)),
+      xlab = expression(sigma^2), ylab = '', yaxt = 'n', frame.plot = FALSE)
+@
+\caption{Prior distributions for \(\mu\) and \(\sigma^2\) used by
+Sinding-Larsen and Xu.}
+\label{theirmusig}
+\end{figure}
+
+\begin{figure}[H]
+<<realdatatheirpriors2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson='realdatatheirpriors1'>>=
+layout(matrix(c(1, 3, 2, 3), nrow = 2))
+par(mar = c(4.1, 1.1, 2.1, 1.1))
+curve(dunif(x, -0.213, -0.088), from = -0.3, to = 0,
+      type = 's', ylim = c(0, 9),
+      main = expression(bold(Uniform(list(-0.213, -0.088))~
+                               'Prior Distribution of b'[0])),
+      xlab = expression(b[0]), ylab = '', yaxt = 'n', frame.plot = FALSE)
+#hist(draws1$b, breaks = 100, freq = FALSE, yaxt = 'n',
+#     main = expression(bold('Prior Distribution of b')),
+#     ylab = '', xlab = 'b')
+curve(dnorm(x, bhat1, se.bhat1), from = -0.3, to = 0.1,
+      main = expression(bold(N(list(-0.0925, 0.00193))~
+                               'Prior Distribution of b')),
+      xlab = 'b', ylab = '', yaxt = 'n', frame.plot = FALSE)
+hist(draws1$beta[draws1$beta<4], breaks = 100, freq = FALSE, yaxt = 'n',
+     main = expression(bold('Marginal Prior Distribution of'~beta)),
+     ylab = '', xlab = expression(beta))
+@
+\caption{Prior distributions for \(b_0\) and \(b\) used by
+Sinding-Larsen and Xu, and the resulting marginal prior distribution
+of \(\beta\).}
+\label{theirb}
+\end{figure}
+
+\begin{figure}[H]
+<<realdatatheirpriors3,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson='realdatatheirpriors1'>>=
+layout(matrix(c(1, 3, 2, 3), nrow = 2))
+par(mar = c(4.1, 1.1, 2.1, 1.1))
+plot(x = 35:59, y = M.prior(35:59, 22), xlim = c(30, 60), type='h', lwd = 2,
+     main = expression(bold('Prior Distribution of M')), ylim = c(0, 0.0625),
+     xlab = expression(M), ylab = '', yaxt = 'n', frame.plot = FALSE)
+curve(dbeta(x, 2.3, 4.28), from = 0, to = 1,
+      main = expression(bold('Beta(2.3, 4.28) Prior Distribution of'~pi)),
+      xlab = expression(pi), ylab = '', yaxt = 'n', frame.plot = FALSE)
+plot(table(draws1$N)/num.draws1, xlab = 'N', ylab = '', xlim = c(20, 60),
+     main = 'Marginal Prior Distribution of N',
+     xaxt = 'n', yaxt = 'n', frame.plot = FALSE)
+axis(1, at = seq(20, 60, 5))
+@
+\caption{Prior distributions for \(M\) and \(\pi\) used by
+Sinding-Larsen and Xu, and the resulting marginal prior distribution
+of \(N\).}
+\label{theirn}
+\end{figure}
+
+\subsection{Weakly-Informative Priors}
+
+I took a fully Bayesian approach, using prior distributions that reflect
+only the knowledge available to me separately from the data. Where I had
+no specific knowledge, I chose priors that were meant to have minimal
+influence on the posterior distribution.
+
+I used weakly-informative priors for \(\mu\) and \(\sigma^2\). Oil fields
+contain volumes on the order of 1 million cubic meters to hundreds of
+millions of cubic meters. On the natural log scale, 1 and 100 correspond
+to values of 0 and 4.6, so I used a
+\(\mathrm{Cauchy}(\mathrm{location}=2, \mathrm{scale}=1.5)\) prior
+for \(\mu\). This distribution is relatively flat on the interval
+\((0,4.6)\) and has 37.1\% of its mass outside of that interval, so it
+will not constrain \(\mu\) very heavily. If the log-sizes are mostly
+between 0 and 4.6, then \(\sigma^2\) is probably less than 4. The
+Half-Cauchy distribution with scale 3 has 59.0\% of its mass below 4
+and is rather flat. These distributions are illustrated in
+Figure~\ref{mymusig}.
+
+Using the empirical equation to relate \(\beta\) to the slope of a
+least-squares line seemed like an unnecessarily convoluted procedure.
+Instead, I opted to place a prior distribution directly on \(\beta\).
+To get a sense of what range would be reasonable for \(\beta\), I
+simulated several discovery sequences by permuting the Halten Terrace
+discoveries using several different values of \(\beta\) (Figure~\ref{myb}).
+Negative values imply that smaller fields tend to be found first. A
+value of zero represents no relationship between a field's size and
+discovery order rank. Negative values do not make sense, but I do not want
+to exclude them if in fact the posterior distribution is centered at zero.
+Positive \(\beta\) values yield the expected relationship where larger
+sizes appear earlier in the discovery order. A value of 2
+resulted in a strong linear relationship between log-size and rank in
+the discovery order. We expect variability in size across the
+discovery order, so \(\beta\) is probably less than 2. To be
+cautiously vague, I chose a \(\mathrm{Uniform}(-1,2)\) prior distribution.
+Curiously, the prior used by Sinding-Larsen allows some unrealistically
+large positive value which I chose to omit (Figure~\ref{myb}, bottom right).
+
+A sample contains little information about \(N\), so the prior distribution
+must provide constraints. I used the \(\mathrm{Binomial}(M-n,\pi)\)
+distribution since it reflects the way that experts think about the possible
+number of oil fields. The experts believe the total number of prospects
+that will be explored to be between 35 and 59, so I used a discrete uniform
+distribution to set all of these values as equally likely. I chose a
+\(\mathrm{Beta}(1,1)\) distribution to reflect a lack of knowledge about
+\(\pi\). As a result, my prior distribution for \(N\) is much more spread
+out than the prior of Sinding-Larsen and Xu (Figure~\ref{myn}).
+
+<<realdatamypriors1,echo=FALSE,cache=TRUE,dependson=c('theirpriors1', 'realdata1')>>=
+set.seed(3429)
+num.draws2 <- 2000000
+
+# Create a data frame to store all the prior stuff.
+draws2 <- data.frame('mu' = numeric(num.draws2),
+                     'sigsq' = numeric(num.draws2),
+                     'beta' = numeric(num.draws2),
+                     'M' = numeric(num.draws2),
+                     'p' = numeric(num.draws2),
+                     'N' = numeric(num.draws2),
+                     'maxS' = numeric(num.draws2),
+                     'totS' = numeric(num.draws2),
+                     'lW' = numeric(num.draws2),
+                     'W' = numeric(num.draws2),
+                     'accept' = logical(num.draws2))
+
+# Define number found so far.
+n.found2 <- nrow(halten)
+
+# Draw mu and sigmasq.
+draws2$mu <- rcauchy(num.draws2, 2, 1.5)
+draws2$sigsq <- abs(rcauchy(num.draws2, 0, 3))
+
+# Draw beta
+draws2$beta <- runif(num.draws2, -1, 2)
+
+# Draw M and pi.
+draws2$M <- sample(35:59, size = num.draws2, replace = TRUE)
+draws2$p <- rbeta(num.draws2, 1, 1)
+
+# Draw N.
+draws2$N <- n.found2 + rbinom(num.draws2, draws2$M-n.found2, draws2$p)
+
+# Draw S.
+S.draws2 <- apply(draws2, 1, function(x){
+    return(exp(rnorm(x['N']-n.found2, x['mu'], sqrt(x['sigsq']))))
+  })
+
+# Compute size of largest undiscovered field.
+draws2$maxS <- sapply(S.draws2, function(x){return(
+    ifelse(length(x)>0, max(x), NA)
+  )})
+
+# Compute total undiscovered volume.
+draws2$totS <- sapply(S.draws2, function(x){return(
+    ifelse(length(x)>0, sum(x), NA)
+  )})
+
+# Weights.
+draws2$lW <- sapply(1:num.draws2,function(x){return(with(draws2,
+    loglik(halten$Size00, S.draws2[[x]],
+           mu[x], sqrt(sigsq[x]), beta[x], N[x], n.found2)
+  ))})
+draws2$W <- exp(draws2$lW - max(draws2$lW))
+
+# Rejection Sampling?
+set.seed(8421)
+draws2$accept <- runif(num.draws2) < draws2$W
+@
+
+\begin{figure}[H]
+<<mypriors2,echo=FALSE,cache=TRUE>>=
+par(mfrow = c(1, 2), mar = c(4.1, 1.1, 2.1, 1.1))
+curve(dnorm(x, 2.38, sqrt(0.54)), lty = 3, from = -4, to = 8,
+      main = expression(bold('Cauchy Prior Distribution of'~mu)),
+      xlab = expression(mu), ylab = '', yaxt = 'n', frame.plot = FALSE)
+curve(dcauchy(x, 2, 1.5), lty = 1, add = TRUE)
+curve(dgamma(x, 2.89^2/2.13, 2.89/2.13), lty = 3, from = 0, to = 15,
+      main = expression(bold('Half-Cauchy Prior Distribution of'~sigma^2)),
+      xlab = expression(sigma^2), ylab = '', yaxt = 'n', frame.plot = FALSE)
+curve(2*dcauchy(x, 0, 3), lty = 1, add = TRUE)
+@
+\caption{Weakly-informative prior distributions for \(\mu\) and \(\sigma^2\).
+For comparison, the distributions used by Sinding-Larsen and Xu are shown
+as dotted curves.}
+\label{mymusig}
+\end{figure}
+
+\begin{figure}[H]
+<<realdatamypriors2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('realdatatheirpriors1','realdatamypriors1')>>=
+layout(matrix(c(1, 4, 2, 5, 3, 6), nrow = 2))
+par(mar = c(5.1, 4.1, 2.1, 1.1))
+
+set.seed(2361)
+simorder1 <- sample(22, 22, replace = FALSE, prob = halten$Size00^-1)
+simorder2 <- sample(22, 22, replace = FALSE, prob = halten$Size00^-0.5)
+simorder3 <- sample(22, 22, replace = FALSE)
+simorder4 <- sample(22, 22, replace = FALSE, prob = halten$Size00^0.5)
+simorder5 <- sample(22, 22, replace = FALSE, prob = halten$Size00^1)
+simorder6 <- sample(22, 22, replace = FALSE, prob = halten$Size00^2)
+
+plot(halten$Size00[simorder1], xlim = c(1, 22), ylim = c(0.5, 1500),
+     log = 'y', xaxt = 'n', yaxt = 'n', type = 'o',
+     main = expression(bold('Simulated Discovery Sequence,'~beta==-1)),
+     xlab = 'Discovery Order', ylab = 'Size',
+     pch = 19, col = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+
+plot(halten$Size00[simorder3], xlim = c(1, 22), ylim = c(0.5, 1500),
+     log = 'y', xaxt = 'n', yaxt = 'n', type = 'o',
+     main = expression(bold('Simulated Discovery Sequence,'~beta==0)),
+     xlab = 'Discovery Order', ylab = 'Size',
+     pch = 19, col = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+
+plot(halten$Size00[simorder4], xlim = c(1, 22), ylim = c(0.5, 1500),
+     log = 'y', xaxt = 'n', yaxt = 'n', type = 'o',
+     main = expression(bold('Simulated Discovery Sequence,'~beta==0.5)),
+     xlab = 'Discovery Order', ylab = 'Size',
+     pch = 19, col = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+
+plot(halten$Size00[simorder5], xlim = c(1, 22), ylim = c(0.5, 1500),
+     log = 'y', xaxt = 'n', yaxt = 'n', type = 'o',
+     main = expression(bold('Simulated Discovery Sequence,'~beta==1)),
+     xlab = 'Discovery Order', ylab = 'Size',
+     pch = 19, col = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+
+plot(halten$Size00[simorder6], xlim = c(1, 22), ylim = c(0.5, 1500),
+     log = 'y', xaxt = 'n', yaxt = 'n', type = 'o',
+     main = expression(bold('Simulated Discovery Sequence,'~beta==2)),
+     xlab = 'Discovery Order', ylab = 'Size',
+     pch = 19, col = 'black')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+
+hist(draws1$beta[draws1$beta<4], breaks = 100, freq = FALSE, yaxt = 'n',
+      main = expression(bold(Uniform(list(-1,2))~
+                               'Prior Distribution of'~beta)),
+     ylab = '', xlab = expression(beta), xlim = c(-1.1, 2.1),
+     col = '#D0D0D0', border = '#D0D0D0')
+curve(dunif(x, -1, 2), from = -1.1, to = 2.1, type = 's', ylim = c(0, 0.35),
+      main = expression(bold(Uniform(list(-1,2))~
+                               'Prior Distribution of'~beta)),
+      xlab = expression(beta), ylab = '', yaxt = 'n', add = TRUE)
+@
+\caption{Simulated discovery sequences using the Halten Terrace size estimates
+and various values of \(\beta\), and a weakly-informative prior distribution
+for \(\beta\). The prior distribution used Sinding-Larsen and Xu is shown
+in grey.}
+\label{myb}
+\end{figure}
+
+\begin{figure}[H]
+<<realdatamypriors3,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('realdatatheirpriors1','realdatamypriors1')>>=
+layout(matrix(c(1, 3, 2, 3), nrow = 2))
+par(mar = c(4.1, 1.1, 2.1, 1.1))
+plot(x = 35:59+0.2, y = M.prior(35:59, 22), xlim = c(30, 60),
+     type='h', lwd = 2, lty = 3,
+     main = expression(bold('Prior Distribution of M')), ylim = c(0, 0.0625),
+     xlab = expression(M), ylab = '', yaxt = 'n', frame.plot = FALSE)
+lines(x = 35:59, y = M.prior2(35:59, 22), xlim = c(30, 60), type='h', lwd = 2)
+curve(dbeta(x, 2.3, 4.28), from = 0, to = 1, lty = 3,
+      main = expression(bold('Beta(1, 1) Prior Distribution of'~pi)),
+      xlab = expression(pi), ylab = '', yaxt = 'n', frame.plot = FALSE)
+curve(dbeta(x, 1, 1), from = -0.025, to = 1.025, type = 's', add = TRUE)
+plot(table(draws1$N)/num.draws1, xlab = 'N', ylab = '', xlim = c(20, 60),
+     main = 'Marginal Prior Distribution of N',
+     xaxt = 'n', yaxt = 'n', lty = 3, frame.plot = FALSE)
+points(x = 22:59-0.12, y = table(draws2$N)/num.draws2, lwd = 2, type = 'h')
+axis(1, at = seq(20, 60, 5))
+@
+\caption{Less-informative prior distributions for \(M\), \(\pi\), and \(N\).
+The dotted lines show the priors used by Sinding-Larsen and Xu.}
+\label{myn}
+\end{figure}
+
+\section{Simulation of Artificial Data}
+\label{simsect}
+
+The discovery process model assumes the data are a random sample, so
+simulation from this model was straightforward. For simplicity, I treated
+the two sub-plays as homogeneous and equal-sized, and assumed they were
+being explored at the same time so that any discovery was equally likely
+to come from either sub-play. I set parameter values near the posterior
+means reported by Sinding-Larsen and Xu for the combined dataset. My
+chosen values were \(N=32\) total fields, \(\beta=0.45\) as the size-bias
+parameter, \(\mu=2.6\) as the mean of the log-sizes, and \(\sigma^2=2.6\)
+for the variance of the log-sizes. To keep the simulated data as similar
+as possible to the real data, I kept \(n=22\) as the number of
+discovered fields.
+
+I first drew 32 log-sizes from a \(\mathrm{N}(2.6, 2.6)\)
+distribution, and then exponentiated those values to get field sizes.
+Next, I independently labeled each field size as being in the overpressured
+zone or the normally pressured zone by drawing from the values 1 or 2
+with equal probability. I then simulated the discovery order by taking a
+sample \((i_1,\dots,i_{32})\), without replacement, from the values
+\(i=1,\dots,32\) using
+\(\mathrm{size}_i^{0.45}/\sum_{j=1}^{32}\mathrm{size}_j^{0.45}\)
+as the probability of selecting the value \(i\). Finally, I placed the
+sizes in the order \((\mathrm{size}_{i_1},\dots,\mathrm{size}_{i_{32}})\),
+and set \(Y_j=\mathrm{size}_{i_j}\), \(j=1,\dots,n\) as the discovered
+fields and \(S_k=\mathrm{size}_{i_k}\), \(k=n+1,\dots,N\) as the undiscovered
+fields.
+
+The simulated discovery sequence (Figure~\ref{simdataplot}) had a
+decreasing trend in field size with some local runs of increasing sizes,
+but no runs were as long as the run of 5 consecutive decreases seen in the
+first half of the Halten Terrace discovery sequence. Across the simulated
+discovery sequence, the sizes had similar variability to the Halten Terrace
+data. However, all of the first 9 Halten Terrace discoveries occurred in the
+normally pressured zone because that zone was explored first. This
+characteristic is absent from the simulated data because the two zones
+were combined into one.
+
+<<simdata1,echo=FALSE,cache=TRUE>>=
+# For now, plugging in values near the authors' posterior means.
+beta <- 0.45
+N <- 32
+n <- 22
+mu <- 2.6
+sigmasq <- 2.6
+
+# Specify the approximate proportion in the normally pressured zone.
+normal <- 0.5
+
+set.seed(8631)
+
+# Simulate lognormal sizes.
+YS.sim <- exp(rnorm(N, mu, sqrt(sigmasq)))
+
+# Randomly assign zone labels
+YS.zone <- sample(2, N, replace = TRUE, prob = c(normal, 1-normal))
+
+# Sample without replacement with probability proporional to
+# size raised to a power.
+order.sim <- sample(N, N, replace = FALSE, prob = YS.sim^beta)
+order.sim2 <- sample(N, N, replace = FALSE, prob = YS.sim^beta/YS.zone)
+discorder <- 1:n
+Y.sim <- YS.sim[order.sim][discorder]
+Y.zone <- YS.zone[order.sim][discorder]
+S.sim <- YS.sim[order.sim][-discorder]
+S.zone <- YS.zone[order.sim][-discorder]
+@
+
+\begin{figure}[H]
+<<simdata2,echo=FALSE,cache=TRUE,dependson='simdata1'>>=
+par(mar = c(4.1, 4.1, 2.1, 1.1))
+plot(YS.sim[order.sim], xlim = c(1, 32), ylim = c(0.5, 1500), log = 'y',
+     type = 'o', yaxt = 'n', pch = 21+3*(YS.zone[order.sim]-1),
+     bg = c(rep('black', n), rep('white', N-n)), xaxt = 'n',
+     main = 'Size-Rank Plot of the Simulated Data',
+     ylab = 'Size (millions of cubic meters)', xlab = 'Discovery Order')
+lines(Size00 ~ Order, lty = 3, data = halten)
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = c(1, 10, 100, 1000))
+legend('topright', ncol = 3, pch = c(NA, NA, 21, 24, 21, 24), col = 'black',
+       pt.bg = c(NA, NA, 'black', 'black', 'white', 'white'),
+       legend = c('Normal Pressure Zone:', 'Overpressured Zone:',
+                  'Discovered', 'Discovered',
+                  'Undiscovered', 'Undiscovered'))
+@
+\caption{Plot of the sizes versus discovery order for the simulated data.
+The dotted line segments show the Halten Terrace discovery sequence.}
+\label{simdataplot}
+\end{figure}
+
+\pagebreak
+\section{Model Fitting and Results}
+
+Sinding-Larsen and Xu fit the discovery process model to the combined play,
+assuming that oil fields in the two sub-plays have a common distribution
+and that the same exploration and discovery process occurred in both
+sub-plays. They used a Monte Carlo simulation to obtain 80,000 draws from
+the joint posterior distribution,
+\begin{multline*}
+p(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N|Y_1,\dots,Y_n)\\
+=\frac{p(N,\beta,\mu,\sigma^2)p(S_{n+1},\dots,S_N|N,\mu,\sigma^2)
+p(Y_1,\dots,Y_n|N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)}
+{\sum_{N}\int p(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N,Y_1,\dots,Y_n)
+d\beta d\mu d\sigma^2}.
+\end{multline*}
+The companion paper~\cite{prior} described their Monte Carlo procedure
+as follows. For \(i=1,\dots,d\),
+\begin{enumerate}
+\item Draws \(N^{(i)}\), \(\beta^{(i)}\),
+\(\mu^{(i)}\), and \(\sigma^{2(i)}\) from the prior distributions of
+\(N\), \(\beta\), \(\mu\), and \(\sigma^2\).
+\item Draw \(S_{n+1}^{(i)},\dots,S_{N^{(i)}}^{(i)}\)
+independently from the \(\mathrm{lognormal}(\mu,\sigma^2)\) distribution.
+\item Compute the likelihood weight,
+\(W_i=p(Y_1,\dots,Y_n|N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)\).
+\end{enumerate}
+The marginal distribution of \(Y_1,\dots,Y_n\),
+\begin{equation*}
+\sum_{N}\int p(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N,Y_1,\dots,Y_n)
+d\beta d\mu d\sigma^2,
+\end{equation*}
+is approximated by \(\sum_{j=1}^dW_j\)
+so posterior expectations are computed as
+\begin{equation*}
+E\left(g(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)|Y_1,\dots,Y_n\right)
+=\frac{\sum_{i=1}^dW_ig(N,\beta,\mu,\sigma^2,S_{n+1},\dots,S_N)}
+{\sum_{j=1}^dW_j}.
+\end{equation*}
+The posterior distributions were summarized with
+histograms, means, and standard deviations.
+
+I fit the model using this Monte Carlo method. I found that the resulting
+collection of prior draws and weights was inconvenient to work with, so
+after taking \(d\) prior draws and computing their weights, I obtained a
+new sample of \(d\) posterior draws by sampling with replacement from the
+prior draws and using \(W_i/\sum_{j=1}^dW_j\) as the probability of
+selecting \(\left(N^{(i)},\beta^{(i)},\mu^{(i)},\sigma^{2(i)}\right)\).
+I took enough samples that, to three significant digits, quantities computed
+from the resampled draws were identical to those computed from the prior
+draws by the weighted sum method.
+
+One issue that Sinding-Larsen and Xu did not mention is that the calculation
+of \(\beta\) requires \(b>b_0\). They described independent prior
+distributions that allow \(b\leq b_0\). When fitting the model with their
+priors, I truncated the distribution of \(b\) in the following manner.
+For any \(i\) such that \(b^{(i)}\leq b_0^{(i)}\), I replaced \(b^{(i)}\)
+and \(b_0^{(i)}\) with new draws from the prior distributions. I repeated
+this until \(b^{(i)}>b_0^{(i)}\) for all \(i\).
+
+Since this is not an iterative algorithm, convergence is not an issue
+that one would naturally be concerned with. However, the Monte Carlo
+draws contained very little information about the posterior distribution.
+I used histograms of the resampled draws as crude measures of convergence.
+A histogram that approximates a smooth curve suggests that the draws contain
+enough information to make posterior inferences. I initially took 100,000
+draws from their priors, but the histograms showed spikes where a few values
+were were sampled much more often than others. I increased the number of
+draws to 500,000. When using my priors, I took 2 million draws. I would
+prefer larger samples than this, but the 2 million draws used up nearly
+all of my computer's available memory.
+
+\subsection{Simulated Data}
+
+The data were simulated using the reported posterior means of the parameters,
+so they can be used to investigate whether the model and the Monte Carlo
+simulation function correctly. If the procedure works as intended, the
+posterior draws should be centered near the known parameter values.
+Inconsistency between the posterior distributions and the parameter
+values indicates problems with either the model or the simulation.
+
+<<fakedatatheirpriors1,echo=FALSE,cache=TRUE,dependson=c('theirpriors1', 'simdata1')>>=
+set.seed(86326)
+num.draws3 <- 500000
+
+# Create a data frame to store all the prior stuff.
+draws3 <- data.frame('mu' = numeric(num.draws3),
+                     'sigsq' = numeric(num.draws3),
+                     'b0' = numeric(num.draws3),
+                     'b' = numeric(num.draws3),
+                     'beta' = numeric(num.draws3),
+                     'M' = numeric(num.draws3),
+                     'p' = numeric(num.draws3),
+                     'N' = numeric(num.draws3),
+                     'maxS' = numeric(num.draws3),
+                     'totS' = numeric(num.draws3),
+                     'lW' = numeric(num.draws3),
+                     'W' = numeric(num.draws3),
+                     'accept' = logical(num.draws3))
+
+# Define number found so far.
+n.found3 <- length(Y.sim)
+
+# Draw mu and sigmasq.
+draws3$mu <- rnorm(num.draws3, 2.38, sqrt(0.54))
+draws3$sigsq <- rgamma(num.draws3, 2.89^2/2.13, 2.89/2.13)
+
+# Draw b0.
+draws3$b0 <- runif(num.draws3, -0.213, -0.088)
+
+# Draw b from the asymptotic sampling distribution of the slope of
+# the simple linear regression of log(size) against the  discovery order.
+order3.lm <- lm(log(Y.sim) ~ discorder)
+bhat3 <- coef(order3.lm)[2]
+se.bhat3 <- arm::se.coef(order3.lm)[2]
+draws3$b <- rnorm(num.draws3, bhat3, se.bhat3)
+
+# Discard impossible draws of b and b0 and get new ones.
+while(sum(draws3$b<draws3$b0)>0){
+  idx <- draws3$b<draws3$b0
+  num.newdraws <- sum(idx)
+  draws3$b0[idx] <- runif(num.newdraws, -0.213, -0.088)
+  draws3$b[idx] <- rnorm(num.newdraws, bhat3, se.bhat3)
+}
+
+# Compute beta.
+draws3$beta <- -log(1-draws3$b/draws3$b0)/sd(log(Y.sim))
+
+# Draw M and pi.
+draws3$M <- sample(35:59, size = num.draws3, replace = TRUE,
+                   prob = M.prior(35:59, n.found3))
+draws3$p <- rbeta(num.draws3, 2.3, 4.28)
+
+# Draw N.
+draws3$N <- n.found3 + rbinom(num.draws3, draws3$M-n.found3, draws3$p)
+
+# Draw S.
+S.draws3 <- apply(draws3, 1, function(x){
+    return(exp(rnorm(x['N']-n.found3, x['mu'], sqrt(x['sigsq']))))
+  })
+
+# Compute size of largest undiscovered field.
+draws3$maxS <- sapply(S.draws3, function(x){return(
+    ifelse(length(x)>0, max(x), NA)
+  )})
+
+# Compute total undiscovered volume.
+draws3$totS <- sapply(S.draws3, function(x){return(
+    ifelse(length(x)>0, sum(x), NA)
+  )})
+
+# Weights.
+draws3$lW <- sapply(1:num.draws3,function(x){return(with(draws3,
+    loglik(Y.sim, S.draws3[[x]],
+           mu[x], sqrt(sigsq[x]), beta[x], N[x], n.found3)
+  ))})
+draws3$W <- exp(draws3$lW - max(draws3$lW))
+
+# Rejection Sampling?
+set.seed(347)
+draws3$accept <- runif(num.draws3) < draws3$W
+@
+
+<<fakedatatheirpriors4,echo=FALSE,cache=TRUE,dependson='fakedatatheirpriors1'>>=
+#sum(draws3$accept) # 41
+#cat('beta')
+#Ebeta <- sum(draws3$beta*draws3$W)/sum(draws3$W)
+#Ebeta
+#sqrt(sum((draws3$beta-Ebeta)^2*draws3$W)/sum(draws3$W))
+#cat('mu')
+#Emu <- sum(draws3$mu*draws3$W)/sum(draws3$W)
+#Emu
+#sqrt(sum((draws3$mu-Emu)^2*draws3$W)/sum(draws3$W))
+#cat('sigmasq')
+#Esigsq <- sum(draws3$sigsq*draws3$W)/sum(draws3$W)
+#Esigsq
+#sqrt(sum((draws3$sigsq-Esigsq)^2*draws3$W)/sum(draws3$W))
+
+#par(mfrow = c(1, 2))
+#hist(draws3$beta[draws3$accept], breaks=100, freq = FALSE)
+#plot(table(draws3$N[draws3$accept])/num.draws3)
+#hist(draws3$mu[draws3$accept], breaks=100, freq = FALSE)
+#hist(draws3$sigsq[draws3$accept], breaks=100, freq = FALSE)
+
+#plot(W ~ beta, data = draws3)
+#plot(W ~ N, data = draws3)
+#plot(W ~ mu, data = draws3)
+#plot(W ~ sigsq, data = draws3)
+
+set.seed(2361)
+post.draws3 <- draws3[sample(num.draws3, replace = TRUE, prob = draws3$W),]
+
+#cat('beta')
+#mean(post.draws3$beta)
+#sd(post.draws3$beta)
+#cat('mu')
+#mean(post.draws3$mu)
+#sd(post.draws3$mu)
+#cat('sigmasq')
+#mean(post.draws3$sigsq)
+#sd(post.draws3$sigsq)
+
+#hist(post.draws3$beta, breaks=100, freq = FALSE)
+#plot(table(post.draws3$N)/num.draws3)
+#hist(post.draws3$mu, breaks=100, freq = FALSE)
+#hist(post.draws3$sigsq, breaks=100, freq = FALSE)
+#hist(post.draws3$maxS[post.draws3$maxS<300], breaks=100, freq = FALSE)
+#hist(post.draws3$totS[post.draws3$totS<1000], breaks=100, freq = FALSE)
+@
+
+<<fakedatamypriors1,echo=FALSE,cache=TRUE,dependson=c('theirpriors1', 'simdata1')>>=
+set.seed(7523)
+num.draws4 <- 2000000
+
+# Create a data frame to store all the prior stuff.
+draws4 <- data.frame('mu' = numeric(num.draws4),
+                     'sigsq' = numeric(num.draws4),
+                     'beta' = numeric(num.draws4),
+                     'M' = numeric(num.draws4),
+                     'p' = numeric(num.draws4),
+                     'N' = numeric(num.draws4),
+                     'maxS' = numeric(num.draws4),
+                     'totS' = numeric(num.draws4),
+                     'lW' = numeric(num.draws4),
+                     'W' = numeric(num.draws4),
+                     'accept' = logical(num.draws4))
+
+# Define number found so far.
+n.found4 <- length(Y.sim)
+
+# Draw mu and sigmasq.
+draws4$mu <- rcauchy(num.draws4, 2, 1.5)
+draws4$sigsq <- abs(rcauchy(num.draws4, 0, 3))
+
+# Draw beta
+draws4$beta <- runif(num.draws4, -1, 2)
+
+# Draw M and pi.
+draws4$M <- sample(35:59, size = num.draws4, replace = TRUE)
+draws4$p <- rbeta(num.draws4, 1, 1)
+
+# Draw N.
+draws4$N <- n.found4 + rbinom(num.draws4, draws4$M-n.found4, draws4$p)
+
+# Draw S.
+S.draws4 <- apply(draws4, 1, function(x){
+    return(exp(rnorm(x['N']-n.found4, x['mu'], sqrt(x['sigsq']))))
+  })
+
+# Compute size of largest undiscovered field.
+draws4$maxS <- sapply(S.draws4, function(x){return(
+    ifelse(length(x)>0, max(x), NA)
+  )})
+
+# Compute total undiscovered volume.
+draws4$totS <- sapply(S.draws4, function(x){return(
+    ifelse(length(x)>0, sum(x), NA)
+  )})
+
+# Weights.
+draws4$lW <- sapply(1:num.draws4,function(x){return(with(draws4,
+    loglik(Y.sim, S.draws4[[x]],
+           mu[x], sqrt(sigsq[x]), beta[x], N[x], n.found4)
+  ))})
+draws4$W <- exp(draws4$lW - max(draws4$lW))
+
+# Rejection Sampling?
+set.seed(7235)
+draws4$accept <- runif(num.draws4) < draws4$W
+@
+
+<<fakedatamypriors4,echo=FALSE,cache=TRUE,dependson='fakedatamypriors1'>>=
+#sum(draws4$accept) # 30!!!
+#cat('beta')
+#Ebeta <- sum(draws4$beta*draws4$W)/sum(draws4$W)
+#Ebeta
+#sqrt(sum((draws4$beta-Ebeta)^2*draws4$W)/sum(draws4$W))
+#cat('mu')
+#Emu <- sum(draws4$mu*draws4$W)/sum(draws4$W)
+#Emu
+#sqrt(sum((draws4$mu-Emu)^2*draws4$W)/sum(draws4$W))
+#cat('sigmasq')
+#Esigsq <- sum(draws4$sigsq*draws4$W)/sum(draws4$W)
+#Esigsq
+#sqrt(sum((draws4$sigsq-Esigsq)^2*draws4$W)/sum(draws4$W))
+
+#par(mfrow = c(1, 2))
+#hist(draws4$beta[draws4$accept], breaks=100, freq = FALSE)
+#plot(table(draws4$N[draws4$accept])/num.draws4)
+#hist(draws4$mu[draws4$accept], breaks=100, freq = FALSE)
+#hist(draws4$sigsq[draws4$accept], breaks=100, freq = FALSE)
+
+#plot(W ~ beta, data = draws4)
+#plot(W ~ N, data = draws4)
+#plot(W ~ mu, data = draws4)
+#plot(W ~ sigsq, data = draws4)
+
+set.seed(876235)
+post.draws4 <- draws4[sample(num.draws4, replace = TRUE, prob = draws4$W),]
+
+#cat('beta')
+#mean(post.draws4$beta)
+#sd(post.draws4$beta)
+#cat('mu')
+#mean(post.draws4$mu)
+#sd(post.draws4$mu)
+#cat('sigmasq')
+#mean(post.draws4$sigsq)
+#sd(post.draws4$sigsq)
+
+#hist(post.draws4$beta, breaks=100, freq = FALSE)
+#plot(table(post.draws4$N)/num.draws4)
+#hist(post.draws4$mu, breaks=100, freq = FALSE)
+#hist(post.draws4$sigsq, breaks=100, freq = FALSE)
+#hist(post.draws4$maxS[post.draws4$maxS<300], breaks=100, freq = FALSE)
+#hist(post.draws4$totS[post.draws4$totS<1000], breaks=100, freq = FALSE)
+@
+
+I used the Monte Carlo simulation and resampling to obtain 500,000 posterior
+draws using the empirical Bayes prior and 2 million posterior draws using
+the weakly-informative prior. The posterior distributions for \(\mu\) and
+\(\sigma^2\) look similar for both priors, with the main difference being
+longer tails coming from the weakly-informative priors. The true values
+\(\mu=2.6\) and \(\sigma^2=2.6\) are consistent with the posterior
+distributions (Figure~\ref{fakemusig}).
+
+The posterior distributions of \(\beta\) have similar centers, but the
+distribution resulting from the empirical Bayes prior is symmetric, while
+the weakly informative prior yields a posterior with a mild but noticeable
+left-skew. The empirical prior may have been too constraining on the left.
+A more distressing observation is that the true value, \(\beta=0.45\),
+is far to the left in both posteriors (Figure~\ref{fakebn}, left). It is
+not far enough into either tail to appear outright inconsistent, but it
+would be worthwhile to perform additional simulation studies to investigate
+whether this model produces reliable posterior distributions for \(\beta\).
+
+The posterior distributions of \(N\) look very much like the prior
+distributions (Figure~\ref{fakebn}, right). The Bayesian model does not
+seem to offer improvement over the maximum likelihood estimator. It
+should always be kept in mind that the \(Y_j\) contain little information
+about \(N\), so any inference about \(N\) relies primarily on prior
+information.
+
+\begin{figure}[H]
+<<fakemusig,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('fakedatatheirpriors4','fakedatamypriors4')>>=
+par(mfrow = c(2, 2), mar = c(0, 1.1, 4.1, 1.1))
+hist(post.draws3$mu[post.draws3$mu>0.5&post.draws3$mu<4],
+     xlim = c(0.5, 4), breaks = 100, freq = FALSE, xaxt = 'n', yaxt = 'n',
+     main = expression(bold('Posterior Distribution of'~mu)),
+     ylab = '', xlab = '')
+text(x = 3, y = 1, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws3$mu), 4),
+                '\nSD:', signif(sd(post.draws3$mu), 4)))
+abline(v = 2.6, lwd = 3, lty = 2)
+mtext('Sinding-Larsen and Xu', 2)
+hist(post.draws3$sigsq[post.draws3$sigsq<6],
+     xaxt = 'n', yaxt = 'n', xlim = c(0, 6), breaks = 70, freq = FALSE,
+     main = expression(bold('Posterior Distribution of'~sigma^2)),
+     ylab = '', xlab = '')
+text(x = 4.5, y = 0.75, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws3$sigsq), 4),
+                '\nSD:', signif(sd(post.draws3$sigsq), 4)))
+abline(v = 2.6, lwd = 3, lty = 2)
+
+par(mar = c(4.1, 1.1, 0, 1.1))
+hist(post.draws4$mu[post.draws4$mu>0.5&post.draws4$mu<4],
+     xlim = c(0.5, 4), breaks = 100, freq = FALSE, yaxt = 'n',
+     main = '', ylab = '', xlab = expression(mu))
+text(x = 3, y = 1.3, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws4$mu), 4),
+                '\nSD:', signif(sd(post.draws4$mu), 4)))
+abline(v = 2.6, lwd = 3, lty = 2)
+mtext('Weakly-Informative', 2)
+hist(post.draws4$sigsq[post.draws4$sigsq<6],
+     yaxt = 'n', xlim = c(0, 6), breaks = 70, freq = FALSE,
+     main = '', ylab = '', xlab = expression(sigma^2))
+text(x = 4.5, y = 0.8, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws4$sigsq), 4),
+                '\nSD:', signif(sd(post.draws4$sigsq), 4)))
+abline(v = 2.6, lwd = 3, lty = 2)
+@
+\caption{Posterior distributions of \(\mu\) and \(\sigma^2\) for
+the simulated data. The dashed vertical lines mark the values
+\(\mu=2.6\) and \(\sigma^2=2.6\) from which the data were simulated.}
+\label{fakemusig}
+\end{figure}
+
+\begin{figure}[H]
+<<fakebn,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('fakedatatheirpriors4','fakedatamypriors4')>>=
+par(mfrow = c(2, 2), mar = c(0, 1.1, 4.1, 1.1))
+hist(post.draws3$beta,
+     breaks = 50, freq = FALSE, xaxt = 'n', yaxt = 'n', xlim = c(-1, 2),
+     main = expression(bold('Posterior Distribution of'~beta)),
+     ylab = '', xlab = '')
+text(x = 1.25, y = 1.8, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws3$beta), 4),
+                '\nSD:', signif(sd(post.draws3$beta), 4)))
+abline(v = 0.45, lwd = 3, lty = 2)
+mtext('Sinding-Larsen and Xu', 2)
+plot(table(post.draws3$N)/num.draws3, xlim = c(20, 60),
+     xaxt = 'n', yaxt = 'n',
+     main = expression(bold('Posterior Distribution of N')),
+     ylab = '', xlab = '', frame.plot = FALSE)
+text(x = 50, y = 0.075, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws3$N), 4),
+                '\nSD:', signif(sd(post.draws3$N), 4)))
+abline(v = 32, lwd = 3, lty = 2)
+
+par(mar = c(4.1, 1.1, 0, 1.1))
+hist(post.draws4$beta,
+     breaks = 100, freq = FALSE, yaxt = 'n', xlim = c(-1, 2),
+     main = '', ylab = '', xlab = expression(beta))
+text(x = 1.25, y = 1.7, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws4$beta), 4),
+                '\nSD:', signif(sd(post.draws4$beta), 4)))
+abline(v = 0.45, lwd = 3, lty = 2)
+mtext('Weakly-Informative', 2)
+plot(table(post.draws4$N)/num.draws4, xlim = c(20, 60),
+     xaxt = 'n', yaxt = 'n',
+     main = '', ylab = '', xlab = 'N', frame.plot = FALSE)
+text(x = 50, y = 0.065, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws4$N), 4),
+                '\nSD:', signif(sd(post.draws4$N), 4)))
+abline(v = 32, lwd = 3, lty = 2)
+axis(1, seq(20, 60, 5))
+@
+\caption{Posterior distributions of \(\beta\) and \(N\) for
+the simulated data. The dashed vertical lines mark the values
+\(\beta=0.45\) and \(N=32\) from which the data were simulated.}
+\label{fakebn}
+\end{figure}
+
+\subsection{Halten Terrace Data}
+
+<<realdatatheirpriors4,echo=FALSE,cache=TRUE,dependson='realdatatheirpriors1'>>=
+#sum(draws1$accept) # 84
+#cat('beta')
+#Ebeta <- sum(draws1$beta*draws1$W)/sum(draws1$W)
+#Ebeta
+#sqrt(sum((draws1$beta-Ebeta)^2*draws1$W)/sum(draws1$W))
+#cat('mu')
+#Emu <- sum(draws1$mu*draws1$W)/sum(draws1$W)
+#Emu
+#sqrt(sum((draws1$mu-Emu)^2*draws1$W)/sum(draws1$W))
+#cat('sigmasq')
+#Esigsq <- sum(draws1$sigsq*draws1$W)/sum(draws1$W)
+#Esigsq
+#sqrt(sum((draws1$sigsq-Esigsq)^2*draws1$W)/sum(draws1$W))
+
+#par(mfrow = c(1, 2))
+#hist(draws1$beta[draws1$accept], breaks=100, freq = FALSE)
+#plot(table(draws1$N[draws1$accept])/num.draws1)
+#hist(draws1$mu[draws1$accept], breaks=100, freq = FALSE)
+#hist(draws1$sigsq[draws1$accept], breaks=100, freq = FALSE)
+
+#plot(W ~ beta, data = draws1)
+#plot(W ~ N, data = draws1)
+#plot(W ~ mu, data = draws1)
+#plot(W ~ sigsq, data = draws1)
+
+set.seed(7527)
+post.draws1 <- draws1[sample(num.draws1, replace = TRUE, prob = draws1$W),]
+
+#cat('beta')
+#mean(post.draws1$beta)
+#sd(post.draws1$beta)
+#cat('mu')
+#mean(post.draws1$mu)
+#sd(post.draws1$mu)
+#cat('sigmasq')
+#mean(post.draws1$sigsq)
+#sd(post.draws1$sigsq)
+
+#hist(post.draws1$beta, breaks=100, freq = FALSE)
+#plot(table(post.draws1$N)/num.draws1)
+#hist(post.draws1$mu, breaks=100, freq = FALSE)
+#hist(post.draws1$sigsq, breaks=100, freq = FALSE)
+#hist(post.draws1$maxS[post.draws1$maxS<300], breaks=100, freq = FALSE)
+#hist(post.draws1$totS[post.draws1$totS<1000], breaks=100, freq = FALSE)
+@
+
+<<realdatamypriors4,echo=FALSE,cache=TRUE,dependson='realdatamypriors1'>>=
+#sum(draws2$accept) # 59
+#cat('beta')
+#Ebeta2 <- sum(draws2$beta*draws2$W)/sum(draws2$W)
+#Ebeta2
+#sqrt(sum((draws2$beta-Ebeta2)^2*draws2$W)/sum(draws2$W))
+#cat('mu')
+#Emu <- sum(draws2$mu*draws2$W)/sum(draws2$W)
+#Emu
+#sqrt(sum((draws2$mu-Emu)^2*draws2$W)/sum(draws2$W))
+#cat('sigmasq')
+#Esigsq <- sum(draws2$sigsq*draws2$W)/sum(draws2$W)
+#Esigsq
+#sqrt(sum((draws2$sigsq-Esigsq)^2*draws2$W)/sum(draws2$W))
+
+#par(mfrow = c(1, 2))
+#hist(draws2$beta[draws2$accept], breaks=100, freq = FALSE)
+#plot(table(draws2$N[draws2$accept])/num.draws2)
+#hist(draws2$mu[draws2$accept], breaks=100, freq = FALSE)
+#hist(draws2$sigsq[draws2$accept], breaks=100, freq = FALSE)
+
+#plot(W ~ beta, data = draws2)
+#plot(W ~ N, data = draws2)
+#plot(W ~ mu, data = draws2)
+#plot(W ~ sigsq, data = draws2)
+
+set.seed(3463)
+post.draws2 <- draws2[sample(num.draws2, replace = TRUE, prob = draws2$W),]
+
+#cat('beta')
+#mean(post.draws2$beta)
+#sd(post.draws2$beta)
+#cat('mu')
+#mean(post.draws2$mu)
+#sd(post.draws2$mu)
+#cat('sigmasq')
+#mean(post.draws2$sigsq)
+#sd(post.draws2$sigsq)
+
+#hist(post.draws2$beta, breaks=100, freq = FALSE)
+#plot(table(post.draws2$N)/num.draws2)
+#hist(post.draws2$mu, breaks=100, freq = FALSE)
+#hist(post.draws2$sigsq, breaks=100, freq = FALSE)
+#hist(post.draws2$maxS[post.draws2$maxS<300], breaks=100, freq = FALSE)
+#hist(post.draws2$totS[post.draws2$totS<1000], breaks=100, freq = FALSE)
+@
+
+To check that I had correctly implemented the model int the way that
+Sinding-Larsen and Xu described, I repeated the analysis on the Halten
+Terrace data. I combined all the data into one group, ignoring zone.
+As with the simulated data, I used the Monte Carlo simulation and
+resampling to simulate 500,000 posterior draws using the Bayes prior
+and 2 million posterior draws using the weakly-informative prior.
+
+When using their prior, my posterior distributions were essentially
+identical to those presented in the paper (Figures \ref{realmusig}
+and \ref{realbn}, top rows). The weakly-informative prior resulted
+in posteriors for \(\mu\), \(\sigma^2\), and \(\beta\) with means
+that were nearly identical to the posterior means from the informative
+prior (Figure~\ref{realmusig} and Figure~\ref{realbn}, left). The
+weakly-informative prior lead to a posterior distribution for \(\beta\)
+that has a very prominent left-skew, which is not seen in the posterior
+resulting from the empirical Bayes prior.
+
+As before, the posterior distributions of \(N\) strongly resemble the
+prior distributions (Figure~\ref{realbn}, right). Posterior inference
+about the number of fields is dominated by the prior information, with
+very little contribution from the data.
+
+Posterior inferences for \(\mu\) and \(\sigma^2\) are very similar
+whether the empirical Bayes prior is used or the weakly informative
+prior is used. This suggests that the effort of finding the empirical
+prior was unnecessary. Given the differences between the posterior
+distributions of \(\beta\), and the possible discrepancy between \(\beta\)
+and its posterior from the simulated data, I would be skeptical about
+inferences for \(\beta\) based on this model.
+
+\begin{figure}[H]
+<<realmusig,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('realdatatheirpriors4','realdatamypriors4')>>=
+par(mfrow = c(2, 2), mar = c(0, 1.1, 4.1, 1.1))
+hist(post.draws1$mu,
+     xlim = c(0.5, 4.5), breaks = 50, freq = FALSE, xaxt = 'n', yaxt = 'n',
+     main = expression(bold('Posterior Distribution of'~mu)),
+     ylab = '', xlab = '')
+text(x = 3.5, y = 0.9, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws1$mu), 4),
+                '\nSD:', signif(sd(post.draws1$mu), 4)))
+abline(v = 2.6217, lwd = 3, lty = 2)
+mtext('Sinding-Larsen and Xu', 2)
+hist(post.draws1$sigsq,
+     xlim = c(0, 8), xaxt = 'n', yaxt = 'n', breaks = 70, freq = FALSE,
+     main = expression(bold('Posterior Distribution of'~sigma^2)),
+     ylab = '', xlab = '')
+text(x = 6, y = 0.5, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws1$sigsq), 4),
+                '\nSD:', signif(sd(post.draws1$sigsq), 4)))
+abline(v = 2.5643, lwd = 3, lty = 2)
+
+par(mar = c(4.1, 1.1, 0, 1.1))
+hist(post.draws2$mu,
+     xlim = c(0.5, 4.5), breaks = 200, freq = FALSE, yaxt = 'n',
+     main = '', ylab = '', xlab = expression(mu))
+text(x = 3.5, y = 0.7, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws2$mu), 4),
+                '\nSD:', signif(sd(post.draws2$mu), 4)))
+abline(v = 2.6217, lwd = 3, lty = 2)
+mtext('Weakly-Informative', 2)
+hist(post.draws2$sigsq[post.draws2$sigsq<8],
+     xlim = c(0, 8), yaxt = 'n', breaks = 70, freq = FALSE,
+     main = '', ylab = '', xlab = expression(sigma^2))
+text(x = 6, y = 0.42, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws2$sigsq), 4),
+                '\nSD:', signif(sd(post.draws2$sigsq), 4)))
+abline(v = 2.5643, lwd = 3, lty = 2)
+@
+\caption{Posterior distributions of \(\mu\) and \(\sigma^2\) for
+the combined Halten Terrace data. The dashed vertical lines mark
+the values \(\mu=2.6217\) and \(\sigma^2=2.5643\), the posterior
+means reported by Sinding-Larsen and Xu.}
+\label{realmusig}
+\end{figure}
+
+\begin{figure}[H]
+<<realbn,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('realdatatheirpriors4','realdatamypriors4')>>=
+par(mfrow = c(2, 2), mar = c(0, 1.1, 4.1, 1.1))
+hist(post.draws1$beta,
+     breaks = 50, freq = FALSE, xaxt = 'n', yaxt = 'n', xlim = c(-1, 2),
+     main = expression(bold('Posterior Distribution of'~beta)),
+     ylab = '', xlab = '')
+text(x = 1.25, y = 1.8, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws1$beta), 4),
+                '\nSD:', signif(sd(post.draws1$beta), 4)))
+abline(v = 0.44514, lwd = 3, lty = 2)
+mtext('Sinding-Larsen and Xu', 2)
+plot(table(post.draws1$N)/num.draws1, xlim = c(20, 60),
+     xaxt = 'n', yaxt = 'n',
+     main = expression(bold('Posterior Distribution of N')),
+     ylab = '', xlab = '', frame.plot = FALSE)
+text(x = 50, y = 0.07, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws1$N), 4),
+                '\nSD:', signif(sd(post.draws1$N), 4)))
+abline(v = 31.6789, lwd = 3, lty = 2)
+
+par(mar = c(4.1, 1.1, 0, 1.1))
+hist(post.draws2$beta,
+     breaks = 50, freq = FALSE, yaxt = 'n', xlim = c(-1, 2),
+     main = '', ylab = '', xlab = expression(beta))
+text(x = 1.25, y = 1.6, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws2$beta), 4),
+                '\nSD:', signif(sd(post.draws2$beta), 4)))
+abline(v = 0.44514, lwd = 3, lty = 2)
+mtext('Weakly-Informative', 2)
+plot(table(post.draws2$N)/num.draws2, xlim = c(20, 60),
+     xaxt = 'n', yaxt = 'n',
+     main = '', ylab = '', xlab = 'N', frame.plot = FALSE)
+text(x = 50, y = 0.04, pos = 4,
+     labels = paste('Mean:', signif(mean(post.draws2$N), 4),
+                '\nSD:', signif(sd(post.draws2$N), 4)))
+abline(v = 31.6789, lwd = 3, lty = 2)
+axis(1, seq(20, 60, 5))
+@
+\caption{Posterior distributions of \(\beta\) and \(N\) for
+the combined Halten Terrace data. The dashed vertical lines
+mark the values \(\beta=0.44514\) and \(N=31.6789\),
+the posterior means reported by Sinding-Larsen and Xu.}
+\label{realbn}
+\end{figure}
+
+\section{Posterior Predictive Checks}
+
+Two quantities of great practical interest are the volume of the largest
+undiscovered oil field and the total volume of oil in all undiscovered
+fields. In reality these are unobserved, but simulation provides an
+opportunity to evaluate the performance of the discovery process model
+for predicting these values.
+
+I performed posterior predictive checks in the following manner. I
+took a simple random sample of 10,000 of the posterior draws. For
+each draw \(i\), I simulated a predicted discovery sequence
+\(\left(Y_1^{(i)},\dots,Y_n^{(i)},S_{n_1}^{(i)},\dots,S_N^{(i)}\right)\)
+from the parameter values \(N^{(i)}\), \(\beta^{(i)}\), \(\mu^{(i)}\),
+and \(\sigma^{2(i)}\) using the method of Section~\ref{simsect}. Then
+for each predicted sequence, I computed
+\(\max\left(S_{n+1}^{(i)},\dots,S_N^{(i)}\right)\) and
+\(\sum_{k=n+1}^NS_k^{(i)}\).
+
+The model tends to underpredict these quantities (Figure~\ref{ppplot}).
+It is apparent the model does a poor job of describing the undiscovered
+fields. The very long tails in the posterior predictive distributions are
+also unsettling. Theoretically, the these are proper distributions because
+the prior distribution and likelihood are proper, and \(N\) has an upper
+bound. The long tails may be due to an inability of the Monte Carlo
+simulation to remove implausibly large draws, or it could result from
+the data being unable to reduce uncertainty in \(N\). In any case, this
+is reason to believe that this model is not useful for its intended purpose
+of making inference about the amount of undiscovered petroleum.
+
+<<theirssimpostpred1,echo=FALSE,cache=TRUE,dependson='fakedatatheirpriors4'>>=
+n.pred3 <- 10000
+post.idx3 <- sample(n.pred3, replace = FALSE)
+post.pred3 <- apply(post.draws3[post.idx3,], 1, function(x){
+    sizes <- exp(rnorm(x['N'], x['mu'], sqrt(x['sigsq'])))
+    return(sizes[sample(x['N'], x['N'],
+                        replace = FALSE, prob = sizes^x['beta'])])
+  })
+post.pred.maxS3 <- sapply(post.pred3, function(x){return(
+    ifelse(length(x)>n.found3, max(x[-(1:n.found3)]), NA)
+  )})
+post.pred.totS3 <- sapply(post.pred3, function(x){return(
+    ifelse(length(x)>n.found3, sum(x[-(1:n.found3)]), NA)
+  )})
+@
+
+<<minesimpostpred1,echo=FALSE,cache=TRUE,dependson='fakedatamypriors4'>>=
+n.pred4 <- 10000
+post.idx4 <- sample(n.pred4, replace = FALSE)
+post.pred4 <- apply(post.draws4[post.idx4,], 1, function(x){
+    sizes <- exp(rnorm(x['N'], x['mu'], sqrt(x['sigsq'])))
+    return(sizes[sample(x['N'], x['N'],
+                        replace = FALSE, prob = sizes^x['beta'])])
+  })
+post.pred.maxS4 <- sapply(post.pred4, function(x){return(
+    ifelse(length(x)>n.found4, max(x[-(1:n.found4)]), NA)
+  )})
+post.pred.totS4 <- sapply(post.pred4, function(x){return(
+    ifelse(length(x)>n.found4, sum(x[-(1:n.found4)]), NA)
+  )})
+@
+
+\begin{figure}[H]
+<<postpred2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE,dependson=c('theirssimpostpred1','minesimpostpred1')>>=
+par(mfrow = c(2, 2), mar = c(0, 1.1, 4.1, 1.1))
+hist(post.pred.maxS3[post.pred.maxS3<150], freq = FALSE, breaks = 70,
+     xaxt = 'n', yaxt = 'n', main = '', ylab = '',
+     xlab = '', xlim = c(0, 150))
+abline(v = max(S.sim), lwd = 3, lty = 2)
+mtext('Sinding-Larsen and Xu', 2)
+hist(post.pred.totS3[post.pred.totS3<600], freq = FALSE, breaks = 70,
+     xaxt = 'n', yaxt = 'n', main = '', ylab = '',
+     xlab = '', xlim = c(0, 600))
+abline(v = sum(S.sim), lwd = 3, lty = 2)
+
+par(mar = c(4.1, 1.1, 0, 1.1))
+hist(post.pred.maxS4[post.pred.maxS4<150], freq = FALSE, breaks = 70,
+     yaxt = 'n', main = '', ylab = '', xlim = c(0, 150),
+     xlab = 'Volume of the Largest Undiscovered Field')
+abline(v = max(S.sim), lwd = 3, lty = 2)
+mtext('Weakly-Informative', 2)
+hist(post.pred.totS4[post.pred.totS4<600], freq = FALSE, breaks = 70,
+     yaxt = 'n', main = '', ylab = '', xlim = c(0, 600),
+     xlab = 'Total Volume of the Undiscovered Fields')
+abline(v = sum(S.sim), lwd = 3, lty = 2)
+@
+\caption{Distributions of \(\max(S_{n+1},\dots,S_N)\) and
+\(\sum_{k=n+1}^NS_k\) from 10,000 posterior predictive datasets. The dashed
+vertical lines mark the values \(\max(S_{n+1},\dots,S_N=95.26)\)
+and \(\sum_{k=n+1}^NS_k=145.2\) from the original simulated data.}
+\label{ppplot}
+\end{figure}
+
+<<theirsrealpostpred1,eval=FALSE,echo=FALSE,cache=TRUE,dependson='realdatatheirpriors1'>>=
+# DO THIS WITH THE POSTERIOR PREDICTIVE DISTRIBUTION.
+par(mar = c(4.1, 4.1, 2.1, 1.1))
+plot(x = NA, y = NA, ylim = log(c(0.5, 1000)), xlim = c(1, 22),
+     xaxt = 'n', yaxt = 'n',
+     main = 'Size-Rank Plot of the Halten Terrace Discoveries',
+     xlab = 'Discovery Order', ylab = 'Size (millions of cubic meters)')
+axis(1, at = c(1, 5, 10, 15, 20))
+axis(2, at = log(c(1, 10, 100, 1000)), labels = c(1, 10, 100, 1000))
+set.seed(2624)
+for(i in sample(num.draws1, 20)){
+  abline(lm(log(c(Size00, S.draws1[[i]])) ~ I(1:draws1$N[i]),
+            data = halten), col = '#B0B0B0B0')
+}
+abline(order1.lm)
+points(log(Size00) ~ Order, data = halten,
+       type = 'o', pch = 21+3*(Zone-1), col = 'black', bg = 'black')
+@
+
+\section{Discussion}
+
+This analysis was hindered by an extremely inefficient method of finding
+the posterior distribution, and by a pervasive frequentist philosophy
+that ignored some of the features of Bayesian Statistics which would have
+been most helpful in this situation. Greater familiarity with Bayesian
+computation and Bayesian models and inference would have resulted in a
+more valid analysis.
+
+\subsection{Gibbs Sampler}
+
+The Monte Carlo method can easily generate many draws, but because
+the draws come from the prior distribution, most of the draws are in
+the tails of the posterior distribution. Almost all of the posterior
+information comes from a very small number of draws with large likelihood
+values. In order to see how much information was really contained in
+the Monte Carlo samples, I considered the prior distribution as a proposal
+distribution and performed rejection sampling. In the best case, when
+the Halten Terrace data were used with the empirical prior, 84 of 500,000
+draws were accepted. For the simulated data with the vague prior, only 30
+out of 2,000,000 draws were accepted! This is an extreme waste of
+computing effort.
+
+Alternatively, it should be possible to use a Gibbs sampler to draw
+directly from the posterior. This may be difficult or impossible to
+implement in standard software, but a statistician familiar with
+Bayesian computation methods could construct a bespoke Gibbs sampler
+for the discovery process model. Below, I present the beginnings of
+such an algorithm.
+
+The first step is to find the complete conditional distributions
+of the parameters. For \(\mu\) and \(\sigma^2\), these are
+\begin{equation*}
+p(\mu|N,\beta,\sigma^2,S_{n+1},S_N,Y_1,Y_n)\\
+\propto p(\mu)\exp\left(-\frac{1}{2\sigma^2}
+\left(\sum_{k=n+1}^N(\log S_k-\mu)^2
++\sum_{j=1}^n(\log Y_j-\mu)^2\right)\right)
+\end{equation*}
+and
+\begin{equation*}
+p(\sigma^2|N,\beta,\mu,S_{n+1},S_N,Y_1,Y_n)
+\propto\frac{p(\sigma^2)}{(\sigma^2)^{\frac{N}{2}}}
+\exp\left(-\frac{1}{2\sigma^2}
+\left(\sum_{k=n+1}^N(\log S_k-\mu)^2
++\sum_{j=1}^n(\log Y_j-\mu)^2\right)\right).
+\end{equation*}
+A Normal prior for \(\mu\) and an inverse-Gamma prior for \(\sigma^2\)
+would be conditionally conjugate. If other priors are used, Normal
+and inverse-Gamma distributions could be used as proposal distributions
+for Metropolis-Hastings sampling.
+
+For \(\beta\), the complete conditional distribution is
+\begin{equation*}
+p(\beta|N,\mu,\sigma^2,S_{n+1},S_N,Y_1,Y_n)
+\propto p(\beta)\prod_{i=1}^n\left(\frac{Y_i^\beta}
+{\sum_{j=i}^nY_j^\beta+\sum_{k=n+1}^NS_k^\beta}\right).
+\end{equation*}
+Depending on the prior, it may be possible to find an efficient
+Metropolis-Hastings proposal distribution. In other situations,
+I would start by using the prior distribution as the proposal
+distribution.
+
+The complete conditional distribution of \(N\) is
+\begin{multline*}
+p(N|\beta,\mu,\sigma^2,S_{n+1},S_N,Y_1,Y_n)\\
+\propto p(N)\prod_{k=n+1}^N\left(\frac{1}{\sqrt{2\pi\sigma^2}S_k}
+e^{-\frac{1}{2\sigma^2}(\log S_k-\mu)^2}\right)
+\begin{pmatrix}N \\ n\end{pmatrix}\prod_{i=1}^n
+\left(\frac{1}{\sum_{j=i}^nY_j^\beta+\sum_{k=n+1}^NS_k^\beta}\right)
+\end{multline*}
+so, for simplicity, I would use the prior as the proposal distribution.
+Since the data have little influence on the posterior distribution of \(N\),
+I would not expect this proposal distribution to cause inefficiency of
+the algorithm. If \(\mu\) and \(\sigma^2\) are sampled efficiently,
+I expect the proposal distribution for \(\beta\) to be the most important
+factor in the efficiency of the sampler. However, the Gibbs sampler
+should provide an accurate description of the posterior distribution
+in fewer draws than Sinding-Larsen and Xu's Monte Carlo procedure.
+
+<<jags4,eval=FALSE,echo=FALSE,cache=FALSE,dependson='simdata1'>>=
+jags4.data <- list('p' = c(rep(0, 12), rep(0.04, 25)),
+                  'y' = Y.sim,
+                  'n' = length(Y.sim))
+jags4.model <- function(){
+  m ~ dcat(p)
+  N <- n + m
+#  beta ~ dunif(-1, 2)
+  mu ~ dt(2, 1.5, 1)
+  sigsq.raw ~ dt(0, 3)
+  sigsq <- abs(sigsq.raw)
+  sig <- pow(sigsq, 0.5)
+  for(i in 1:n){
+    y[i] ~ dlnorm(mu, sig)
+  }
+  for(i in 1:m){
+    s[i] ~ dlnorm(mu, sig)
+  }
+}
+jags4.params <- c('s', 'N', 'mu', 'sigsq')
+@
+
+\subsection{Other Comments}
+
+Sinding-Larsen and Xu used methods that are ostensibly Bayesian, but
+presented them in a way that mimicked a frequentist analysis. Most of
+the posterior distributions were summarized only by histograms, posterior
+means, and posterior standard deviations. No posterior intervals were
+provided, and posterior probabilities were reported only for a few
+quantities of especially high interest to researchers. Additionally,
+the phrase ``Bayesian estimate'' appears numerous times throughout the
+paper in reference to a posterior mean. This suggests an underappreciation
+of the flexibility that is possible when making inference from a posterior
+distribution, or an attempt to write for an audience that was not expected
+to understand a Bayesian analysis.
+
+They also fit two different models and then combined inferences
+inappropriately. The bulk of their analysis was based on fitting the
+model to the combined dataset. This was unjustified because the two
+sub-plays were subject to different discovery processes. They acknowledged
+this difference by then fitting the model separately to each sub-play
+and reporting that the posterior means for the parameters differed between
+the sub-plays. However, inferences about the site as a whole were based
+on the combined data rather than averages of the separate results.
+Instead, they could have considered a more versatile hierarchical model
+where each sub-play would have its own set of parameters, and prior
+information about the differences between the sub-plays could be
+incorporated.
+
+\section{Conclusion}
+
+My simulation study provides evidence that the discovery process model
+poorly describes the unobserved field sizes and the size-bias parameter.
+I have also shown that the complicated process of estimating an empirical
+prior is unnecessary because very similar results can be obtained from a
+weakly informative prior. Additionally, the Monte Carlo simulation
+proposed by Sinding-Larsen and Xu is extremely inefficient. I recommend
+that future analyses of petroleum discovery data from multiple sub-plays
+should consider using a hierarchical model fit by Gibbs sampling.
+
+\begin{thebibliography}{9}
+
+\bibitem{hist} Koch, J. O., and Heum, O. R., 1995, Exploration trends of
+the Halten Terrace, offshore mid-Norway: The potential role of mechanical
+compaction, pressure transfer and stress, in Hanslien, S., ed.,
+\emph{Petroleum exploration and exploitation in Norway}: Norwegian
+Petroleum Society Spec. Publ.~4, p.~105-114.
+
+\bibitem{prev} Sinding-Larsen, R., and Chen, Z., 1996, Cross-validation of
+re-source estimates from discovery process modeling and volumetric
+accumulation modeling: Example from the Lower and Middle Jurassic play
+of the Halten Terrance, offshore Norway, \emph{in} Dore, A. G., and
+Sinding-Larsen, R., eds., \emph{Quantitative prediction and evaluation of
+petroleum resources}, Elsevier, p.~105-114.
+
+\bibitem{disc} Sinding-Larsen, R., and Xu, J., 2005, Bayesian Discovery
+Process Modeling of the Lower and Middle Jurassic Play of the Halten
+Terrace, Offshore Norway, as Compared with the Previous Modeling: Natural
+Resources Research, v.~14, no.~3, p.~235-248.
+
+\bibitem{play} Stoneley, R., 1995, \emph{Introduction to Petroleum
+Exploration for Non-Geologists}, Oxford University Press.
+
+\bibitem{prior} Xu, J., and Sinding-Larsen, R., 2005, How to choose
+priors for Bayesian estimation of the discovery process model: Natural
+Resources Research, v.~14, no.~3, p.~211-233.
+
+\end{thebibliography}
+
+\end{document}
