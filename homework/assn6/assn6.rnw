@@ -1,0 +1,985 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 6}
+\author{Kenny Flagg}
+\date{October 14, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE, message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(R2jags)
+@
+
+\begin{enumerate}
+
+\item %1
+
+\begin{enumerate}
+
+\item %a
+
+I am finally getting in the habit of thoroughly commenting my code, so my
+Metropolis sampler goes on for nearly the next two pages. The results begin
+on page 3.
+
+<<prob1a1,cache=TRUE>>=
+# Here's the data!
+y.obs <- c(23, 24, 25, 26.5, 27.5)
+
+# I like functions. Here's a function draw from J.
+#  current  Current value of theta
+#  a        Radius of support (tuning parameter)
+draw.Unif.J <- function(current, a){return(runif(1, current - a, current + a))}
+
+# Cauchy location parameter log-liklihood
+loglik.Cauchy <- function(theta, y, scale = 1){
+  # sapply allows theta to be a vector
+  return(sapply(theta, function(x){sum(dcauchy(y, location = x, scale = scale, log = TRUE ))}))
+}
+
+# Normal prior log-density
+logprior.Normal <- function(theta, mean = 20, v = 5){
+  return(dnorm(theta, mean = mean, sd = sqrt(v), log = TRUE))
+}
+
+# Unscaled posterior log-density
+logpost.theta <- function(theta, y = y.obs){
+  return(loglik.Cauchy(theta, y) + logprior.Normal(theta))
+}
+
+# Single variable Metropolis sampler
+#  theta.init  Starting value of theta
+#  n.iter      Number of iterations
+#  t           Log of target distribution
+#              First argument must be theta (nothing else is passed)
+#  J           Function to generate one draw from the jumping distrbution
+#              First argument must be the current value of theta
+#  ...         Additional arguments (tuning parameters) to pass to J
+Metropolis.sampler <- function(theta.init, n.iter, t, J, ...){
+  # Create a vector to store draws
+  theta <- c(theta.init, numeric(n.iter))
+
+  # I'm going to save everything for debugging/transarency/OCD purposes.
+  # Create a vector to store candidates
+  candidate <- numeric(n.iter)
+
+  # Create a vector to store whether we accepted each candidate
+  accept <- numeric(n.iter)
+
+  # Create a vector to store Metropolis ratios
+  r <- numeric(n.iter)
+
+  # Create a vector of Unif(0, 1) draws
+  u <- runif(n.iter)
+
+  # Note: the theta vector index is ahead by 1.
+  # The ith candidate is drawn from J(candidate[i]|theta[i]) because theta
+  # has an extra entry, the initial value, at the begining.
+  for(i in 1:n.iter){
+    # Draw a candidate
+    candidate[i] <- J(theta[i], ...)
+
+    # Get the Metropolis ratio
+    r[i] <- exp(t(candidate[i]) - t(theta[i]))
+
+    # Accept the candidate if u < r
+    # We'll always accept if the candidate has higher density (r > 1)
+    if(u[i] < r[i]){
+      theta[i+1] <- candidate[i]
+      accept[i] <- TRUE
+    }else{
+          theta[i+1] <- theta[i]
+          accept[i] <- FALSE
+    }
+  }
+
+  # Calculate acceptance rate
+  accept.rate <- mean(accept)
+
+  # Make a list of all this stuff
+  # Later on I might remove the initial value from theta, but for now
+  # I want it on my path plots to see the whole convergence process.
+  return(list('theta' = theta,
+              'candidate' = candidate,
+              'accept' = accept,
+              'r' = r,
+              'u' = u,
+              'accept.rate' = accept.rate))
+}
+@
+
+\pagebreak
+I initially had no I idea what values would be good choices for \(a\), so
+I began by using powers of 2, from \(2^{-3}\) to \(2^4\), to investigate
+different orders of magnitude. I set an initial value of \(\theta=20\)
+and ran my Metropolis sampler for 200 iterations with each \(a\).
+
+<<prob1a2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(9832)
+as <- 2^(-3:4)
+theta.draws <- lapply(as, function(x){
+  Metropolis.sampler(theta.init = 20, n.iter = 200,
+                     J = draw.Unif.J, t = logpost.theta, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(2, 2, 2, 2, 1, 1, 1, 1)
+plot(theta.draws[[1]]$theta, type = 'l', lty = 1, lwd = 2, ylim = c(18, 28),
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(theta.draws[[i]]$theta, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+\begin{center}
+<<prob1a3,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(theta.draws, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     log = 'x', main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+When \(a\) values of 2 and above were used, the sampler converged almost
+immediately, but the sample paths show many flat sections where draws were
+repeatedly rejected. The two smallest values of \(a\), 0.125 and 0.25,
+resulted in the sampler failing to converge within 200 iterations. The
+other two values, 0.5 and 1, resulted in convergence after about 50
+iterations.
+
+Acceptance rate decreased as \(a\) increased. I would like to compromise
+between a high acceptance rate and fast convergence. It looks like a
+value around 1 would be acceptable, so I ran the sampler with additional
+values of \(a\) from 0.5 to 2.25 in steps of 0.25. Again, I used
+\(\theta=20\) as the initial value and ran algorithm for 200 iterations.
+
+<<prob1a4,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(2327)
+as <- seq(0.5, 2.25, 0.25)
+theta.draws2 <- lapply(as, function(x){
+  Metropolis.sampler(theta.init = 20, n.iter = 200,
+                     J = draw.Unif.J, t = logpost.theta, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(2, 2, 2, 2, 1, 1, 1, 1)
+plot(theta.draws2[[1]]$theta, type = 'l', lty = 1, lwd = 2, ylim = c(18, 28),
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(theta.draws2[[i]]$theta, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+\begin{center}
+<<prob1a5,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(theta.draws2, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+Values of 0.5 and 0.75 led to convergence around the 50th iteration. The
+values 1 and above all resulted in very quick convergence and the sample
+path plots all look similar. Again, the acceptance rate decreased as
+\(a\) increased.
+
+I chose \(a=1.25\) and ran the Metropolis sampler for 10,050 iterations,
+once again using \(\theta=20\) for the initial value. I then discarded the
+initial value and the first 50 draws as burn-in.
+
+I used the sample path plots on the next page to assess convergence. The
+plot on the top left shows that the sampler converged well within 50
+iterations. The path plot of 1,000 draws shows some minimal autocorrelation,
+but the sampler did move around the high-density area. The plot of the whole
+sequence shows that the sampler stayed in one area most of the time, but
+extreme values did occasionally occur.
+
+<<prob1a6,echo=FALSE,out.height='0.7\\linewidth',fig.height=7,cache=TRUE>>=
+set.seed(8763)
+theta.post.draws <- Metropolis.sampler(theta.init = 20, n.iter = 10050,
+                     J = draw.Unif.J, t = logpost.theta, a = 1.25)
+layout(matrix(c(1, 3, 2, 3), nrow = 2), widths = c(1, 2, 1, 2))
+plot(theta.post.draws$theta, xlim = c(1, 100), ylim = c(20, 28), type = 'l',
+     xaxt = 'n', main = 'The First 100 Iterations',
+     xlab = 'Iteration', ylab = expression(theta))
+axis(1, at = seq(10, 90, 20), labels = seq(-40, 40, 20))
+
+theta.post <- theta.post.draws$theta[-(1:51)]
+plot(theta.post, xlim = c(6000, 7000), ylim = c(20, 28), type = 'l',
+     main = 'A Representative Sample Path Plot',
+     xlab = 'Iteration', ylab = expression(theta))
+plot(theta.post, ylim = c(20, 28), type = 'l',
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plot for 10,000 Draws')
+@
+
+A histogram and summary statistics appear below. The vertical lines
+on the histogram show 99\% confidence bounds and the median.
+
+\begin{center}
+<<prob1a8,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+post.mean <- mean(theta.post)
+post.int <- quantile(theta.post, c(0.005, 0.5, 0.995))
+post.pr1 <- mean(theta.post > 25)
+post.pr2 <- mean(theta.post > 30)
+
+hist(theta.post, breaks = 100, freq = FALSE,
+     main = 'Histogram of 10,000 McMC Posterior Draws',
+     xlab = expression(theta))
+abline(v = c(post.int), lty = 2)
+@
+
+\begin{tabular}{ccccc}
+Posterior Mean & 99\% Posterior Interval & Posterior Median &
+\(Pr(\theta>25|y)\) & \(Pr(\theta>30|y)\) \\
+\hline
+<<prob1a7,echo=FALSE,results='asis',cache=TRUE>>=
+cat(round(post.mean, 2), '&')
+cat('(', round(post.int[1], 2), ', ', round(post.int[3], 2), ') &', sep = '')
+cat(round(post.int[2], 2), '&')
+cat(round(post.pr1, 4), '&')
+cat(round(post.pr2, 4))
+@
+\end{tabular}
+\end{center}
+
+\pagebreak
+\item %b
+
+The only modification I made to the code from part (a) was to define
+a new function to draw from the \(\mathrm{N}(\theta^{curr}|a^2)\)
+jumping distribution. Since most draws from the jumping distribution will be
+within \(2a\) of the current value, I expected the ideal \(a\) to be smaller
+than it was in part (a). Just to check, I again started by using the
+same \(a\) values and an initial value of \(\theta=20\).
+
+<<prob1b1,echo=FALSE,cache=TRUE>>=
+# Normal jumping distribution
+#  current  Current value of theta
+#  a        Standard deviation (tuning parameter)
+draw.Normal.J <- function(current, a){return(rnorm(1, current, a))}
+@
+
+<<prob1b2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(23798)
+as <- 2^(-3:4)
+theta.draws3 <- lapply(as, function(x){
+  Metropolis.sampler(theta.init = 20, n.iter = 200,
+                     J = draw.Normal.J, t = logpost.theta, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(2, 2, 2, 2, 1, 1, 1, 1)
+plot(theta.draws3[[1]]$theta, type = 'l', lty = 1, lwd = 2, ylim = c(18, 28),
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(theta.draws3[[i]]$theta, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+Values of \(a=1\) and larger resulted in very quick convergence. As before,
+increasing \(a\) decreased the acceptance rate. It looks like an acceptable
+trade-off is near \(a=1\).
+
+I ran the sampler again for several values of \(a\) from 0.25 to 2.
+
+\begin{center}
+<<prob1b3,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(theta.draws3, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     log = 'x', main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+<<prob1b4,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(438)
+as <- seq(0.25, 2, 0.25)
+theta.draws4 <- lapply(as, function(x){
+  Metropolis.sampler(theta.init = 20, n.iter = 200,
+                     J = draw.Normal.J, t = logpost.theta, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(2, 2, 2, 2, 1, 1, 1, 1)
+plot(theta.draws4[[1]]$theta, type = 'l', lty = 1, lwd = 2, ylim = c(18, 28),
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(theta.draws4[[i]]$theta, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+\begin{center}
+<<prob1b5,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(theta.draws4, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+I decided \(a=0.75\) was a reasonable choice. I repeated the analysis from
+part (a), again using an initial value of \(\theta=20\), running the
+sampler for 10,050 iterations, and discarding the initial value and the
+first 50 draws as burn-in.
+
+Sample path plots appear on the next page, followed by a histogram
+and a summary table. The algorithm converged almost immediately. At
+a glance, it looks like there were more large jumps than when the Uniform
+jumping distribution was used.
+
+<<prob1b6,echo=FALSE,out.height='0.7\\linewidth',fig.height=7,cache=TRUE>>=
+set.seed(8324)
+theta.post.draws2 <- Metropolis.sampler(theta.init = 20, n.iter = 10050,
+                                        J = draw.Unif.J, t = logpost.theta, a = 1.25)
+layout(matrix(c(1, 3, 2, 3), nrow = 2), widths = c(1, 2, 1, 2))
+plot(theta.post.draws2$theta, xlim = c(1, 100), ylim = c(20, 30), type = 'l',
+     xaxt = 'n', main = 'The First 100 Iterations',
+     xlab = 'Iteration', ylab = expression(theta))
+axis(1, at = seq(10, 90, 20), labels = seq(-40, 40, 20))
+
+theta.post2 <- theta.post.draws2$theta[-(1:51)]
+plot(theta.post2, xlim = c(4000, 5000), ylim = c(20, 30), type = 'l',
+     main = 'A Representative Sample Path Plot',
+     xlab = 'Iteration', ylab = expression(theta))
+plot(theta.post2, ylim = c(20, 30), type = 'l',
+     xlab = 'Iteration', ylab = expression(theta),
+     main = 'Sample Path Plot for 10,000 Draws')
+@
+
+
+\begin{center}
+<<prob1b8,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+post.mean2 <- mean(theta.post2)
+post.int2 <- quantile(theta.post2, c(0.005, 0.5, 0.995))
+post.pr12 <- mean(theta.post2 > 25)
+post.pr22 <- mean(theta.post2 > 30)
+
+hist(theta.post2, breaks = 100, freq = FALSE,
+     main = 'Histogram of 10,000 McMC Posterior Draws',
+     xlab = expression(theta))
+abline(v = c(post.int2), lty = 2)
+@
+
+\begin{tabular}{ccccc}
+Posterior Mean & 99\% Posterior Interval & Posterior Median &
+\(Pr(\theta>25|y)\) & \(Pr(\theta>30|y)\) \\
+\hline
+<<prob1b7,echo=FALSE,results='asis',cache=TRUE>>=
+cat(round(post.mean2, 2), '&')
+cat('(', round(post.int2[1], 2), ', ', round(post.int2[3], 2), ') &', sep = '')
+cat(round(post.int2[2], 2), '&')
+cat(round(post.pr12, 4), '&')
+cat(round(post.pr22, 4))
+@
+\end{tabular}
+\end{center}
+
+\item %c
+
+Both algorithms converged in fewer than 50 iterations and resulted in nearly
+identical posterior distributions. In both cases, I considered the tuning
+parameter as a sort of radius of the possible jumps; neither was
+difficult to tune. The only difference seems to be that the Normal
+allows occasional very large jumps, which might help it explore the
+parameter space more thoroughly. I prefer the Normal distribution, but only
+for this reason.
+
+\end{enumerate}
+
+\pagebreak
+\item %2
+
+I modified my Metropolis sampler into a Metropolis-Hastings sampler. The
+only major change was to include a function to evaluate the density of
+the jumping distribution. The code for the sampler takes up most of the
+next two pages.
+
+<<prob21,cache=TRUE>>=
+# Draw from J
+#  current  Current value of y
+#  a        Size (tuning parameter)
+draw.nbin.J <- function(current, a){return(rnbinom(1, size = a, mu = current))}
+
+# Log mass of J
+#  candidate  Candidate value of y
+#  current    Current value of y
+#  a          Size (tuning parameter)
+log.nbin.J <- function(candidate, current, a){
+  return(dnbinom(candidate, size = a, mu = current, log = TRUE))
+}
+
+# Target mass funciton
+log.target.y <- function(y, lambda = 8){
+  return(dpois(y, lambda, log = TRUE))
+}
+
+# Single variable Metropolis-Hastings sampler
+#  y.init  Starting value of y
+#  n.iter  Number of iterations
+#  t       Log of target distribution
+#          First argument must be y (nothing else is passed)
+#  Jdist   Log-density/mass function of the jumping distribution
+#          First argument must be the value of y whose density is evaluated
+#          Second arguments must be the value of y being conditioned upon
+#  J       Function to generate one draw from the jumping distrbution
+#          First argument must be the current value of y
+#  ...     Additional arguments (tuning parameters) to pass to J and Jdist
+MH.sampler <- function(y.init, n.iter, t, Jdist, J, ...){
+  # Create a vector to store draws
+  y <- c(y.init, numeric(n.iter))
+
+  # I'm going to save everything for debugging/transarency/OCD purposes.
+  # Create a vector to store candidates
+  candidate <- numeric(n.iter)
+
+  # Create a vector to store whether we accepted each candidate
+  accept <- numeric(n.iter)
+
+  # Create a vector to store Metropolis ratios
+  r <- numeric(n.iter)
+
+  # Create a vector of Unif(0, 1) draws
+  u <- runif(n.iter)
+
+  # Note: the theta vector index is ahead by 1.
+  # The ith candidate is drawn from J(candidate[i]|y[i]) because y
+  # has an extra entry, the initial value, at the begining.
+  for(i in 1:n.iter){
+    # Draw a candidate
+    candidate[i] <- J(y[i], ...)
+
+    # Get the Metropolis-Hastings ratio
+    r[i] <- exp(t(candidate[i]) - t(y[i])
+                + Jdist(y[i], candidate[i], ...)
+                - Jdist(candidate[i], y[i], ...))
+
+    # Accept the candidate if u < r
+    # We'll always accept if the candidate has higher density (r > 1)
+    if(u[i] < r[i]){
+      y[i+1] <- candidate[i]
+      accept[i] <- TRUE
+    }else{
+          y[i+1] <- y[i]
+          accept[i] <- FALSE
+    }
+  }
+
+  # Calculate acceptance rate
+  accept.rate <- mean(accept)
+
+  # Make a list of all this stuff
+  # Later on I might remove the initial value from theta, but for now
+  # I want it on my path plots to see the whole convergence process.
+  return(list('y' = y,
+              'candidate' = candidate,
+              'accept' = accept,
+              'r' = r,
+              'u' = u,
+              'accept.rate' = accept.rate))
+}
+@
+
+The proposal distribution is Negative Binomial with mean \(y^{curr}\) and
+shape parameter \(a\). The variance is \(y^{curr}+\dfrac{(y^{curr})^2}{a}\).
+As \(a\) goes to infinity, the variance decreases to \(y^{curr}\); decreasing
+\(a\) will increase the variance and encourage larger jumps. Since the
+variance also depends on \(y^{curr}\), my instinct is to choose \(a\) to
+``balance'' \(y^{curr}\) in the sense that \(a\) is small enough to prevent
+enormous jumps when \(y^{curr}\) is large, but still allow the sampler
+to easily move around the parameter space when \(y^{curr}\) is small.
+Since the target distribution has a known mean of 8, considering \(a\)
+on the order of 8 or 64 seems like a reasonable starting point.
+
+I started by setting an initial value of \(y=30\) and ran the sampler
+for 100 iterations for several different \(a\) values. In keeping with my
+theme for this assignments, I used powers of 2 to see the effect of \(a\)
+across different magnitudes. The sample path plots and acceptance rates
+appear on the next page.
+
+<<prob22,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(78623)
+as <- 2^(1:8)
+pois.draws <- lapply(as, function(x){
+  MH.sampler(y.init = 30, n.iter = 100, Jdist = log.nbin.J,
+                     J = draw.nbin.J, t = log.target.y, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(1, 1, 1, 1, 2, 2, 2, 2)
+plot(pois.draws[[1]]$y, type = 'l', lty = 1, lwd = 1, ylim = c(0, 30),
+     xlab = 'Iteration', ylab = 'y',
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(pois.draws[[i]]$y, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+\begin{center}
+<<prob23,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(pois.draws, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     log = 'x', main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+The largest \(a\) values, 128 and 256, led to convergence by the 30th
+iteration. The other runs reached the area of high probability in less
+than 10 iterations. I do not see any other notable differences in the
+sample path plot.
+
+The acceptance rate plot shows a vague increasing trend that levels off
+around \(a=32\). It seemed worthwhile to consider some additional \(a\)
+values between 8 and 64, so I again ran the sampler for 100 iterations
+with an initial value of \(y=30\).
+
+<<prob24,echo=FALSE,out.height='0.5\\linewidth',fig.height=5,cache=TRUE>>=
+set.seed(2352)
+as <- seq(8, 64, 8)
+pois.draws2 <- lapply(as, function(x){
+  MH.sampler(y.init = 30, n.iter = 100, Jdist = log.nbin.J,
+                     J = draw.nbin.J, t = log.target.y, a = x)
+  })
+
+ltys <- c(1, 2, 3, 4, 1, 2, 3, 4)
+lwds <- c(2, 2, 2, 2, 1, 1, 1, 1)
+plot(pois.draws2[[1]]$y, type = 'l', lty = 1, lwd = 2, ylim = c(0, 30),
+     xlab = 'Iteration', ylab = 'y',
+     main = 'Sample Path Plots for Various a')
+for(i in 2:8){
+  lines(pois.draws2[[i]]$y, lty = ltys[i], lwd = lwds[i])
+}
+legend('bottom', lty = ltys, lwd = lwds, bg = 'white', horiz = TRUE,
+       cex = 0.75, legend = paste('a =', as))
+@
+
+\begin{center}
+<<prob25,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+accept.rates <- unlist(lapply(pois.draws2, function(x){x$accept.rate}))
+plot(accept.rates ~ as, type = 'o', pch = 19, xaxt = 'n', ylim = c(0, 1),
+     main = 'Acceptance Rates for Various a',
+     xlab = 'a', ylab = 'Proportion Accepted')
+text(x = as, y = accept.rates, labels = accept.rates, pos = 3, cex = 0.75)
+axis(1, at = as, labels = as)
+@
+\end{center}
+
+Again, the sample path plots look essentially the same. The acceptance
+rates have a bit of an increasing trend, but it seems like any value
+in the interval \([8, 64]\) would be reasonable. I chose \(a=32\) simply
+because it is near the middle of this interval.
+
+I left the initial value at 30 and ran the Metropolis-Hastings sampler
+for 10,030 iterations. I discarded the initial value and  first 30 draws as
+burn-in. Sample path plots and summaries appear on the following page.
+
+<<prob26,echo=FALSE,out.height='0.7\\linewidth',fig.height=7,cache=TRUE>>=
+set.seed(86235)
+y.post.draws <- MH.sampler(y.init = 30, n.iter = 10030, Jdist = log.nbin.J,
+                           J = draw.nbin.J, t = log.target.y, a = 32)
+layout(matrix(c(1, 3, 2, 3), nrow = 2), widths = c(1, 2, 1, 2))
+plot(y.post.draws$y, xlim = c(1, 100), ylim = c(0, 20), type = 'l',
+     xaxt = 'n', main = 'The First 100 Iterations',
+     xlab = 'Iteration', ylab = 'y')
+axis(1, at = seq(10, 90, 20), labels = seq(-20, 60, 20))
+
+y.post <- y.post.draws$y[-(1:31)]
+plot(y.post, xlim = c(1500, 2500), ylim = c(0, 20), type = 'l',
+     main = 'A Representative Sample Path Plot',
+     xlab = 'Iteration', ylab = 'y')
+plot(y.post, ylim = c(0, 20), type = 'l',
+     xlab = 'Iteration', ylab = 'y',
+     main = 'Sample Path Plot for 10,000 Draws')
+@
+
+The distribution of the draws appears below. The vertical lines mark some
+selected quantiles, also tabulated below the plot.
+
+\begin{center}
+<<prob28,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+post.mean <- mean(y.post)
+post.qs <- quantile(y.post, c(0.025, 0.25, 0.5, 0.75, 0.975))
+
+plot(table(y.post)/sum(table(y.post)), xlab = 'y', ylab = 'Probability',
+     main = 'Distribution of 10,000 McMC Posterior Draws',
+     xlim = c(0, 20), ylim = c(0, 0.15), xaxt = 'n')
+abline(v = c(post.qs), lty = 2)
+axis(1, at = pretty(0:20))
+@
+
+\begin{tabular}{cccccc}
+Posterior Mean & 2.5\% & 25\% & Posterior Median & 75\% & 97.5\%  \\
+\hline
+<<prob27,echo=FALSE,results='asis',cache=TRUE>>=
+cat(round(post.mean, 2), '&')
+cat(round(post.qs, 2), sep = '&')
+@
+\end{tabular}
+\end{center}
+
+\pagebreak
+\item %3
+
+Bayesian analyses often use simulation methods, like Markov chain Monte
+Carlo, because the task of finding a posterior distribution is often
+very difficult to do mathematically. It can involve tricky conditional
+probability calculations, and sometimes it is impossible to find an
+exact expression for the distribution function.
+
+There are several methods to indirectly generate random draws
+from the posterior distribution by using the probability model and the prior
+distribution. For making inference, an extremely large sample from the
+posterior is just as useful as a formula. A computer can draw tens of
+thousands of random numbers much more easily than a human can do
+complicated calculus problems to describe the distribution analytically,
+so computational methods are a natural alternative.
+
+However, it should be noted that a Bayesian analysis does not have to use
+simulations, and Markov chain Monte Carlo methods are not used exclusively
+by Bayesian statisticians. For simple Bayesian analyses of Normal means
+or Binomial probabilities, there exist simple formulas to find posterior
+distributions; computer-intensive techniques are not needed. Also, McMC
+is frequently used to fit multilevel models outside of a Bayesian context.
+Such analyses typically use non-informative priors and are equivalent
+to estimating the parameters by maximizing the likelihood. The posterior
+distribution is used to find the standard errors of the estimators, and
+the results are interpreted in a frequentist way. Bayesian data analysis
+is defined by the philosophy of finding a posterior distribution, not by
+the use of Monte Carlo methods.
+
+\item %4
+
+\begin{enumerate}
+
+\item %a
+
+The model is \(y|\mu\sim\mathrm{N}(\mu, \sigma^2)\),
+\(\mu\sim\mathrm{N}(\mu_0, \tau^2_0)\), where \(\sigma^2=2\) is known.
+For now, I will set \(\mu_0=40\) and \(\tau^2_0=10\) to create a weak
+prior that disagrees with the data.
+
+Then the posterior distribution of \(\mu\) is
+\(\mu|y\sim\mathrm{N}(\mu_1, \tau^2_1)\), where
+\begin{align*}
+\mu_1&=\frac{\frac{\mu_0}{\tau^2_0}+\frac{y}{\sigma^2}}
+{\frac{1}{\tau^2_0}+\frac{1}{\sigma^2}}
+=\frac{\frac{40}{10}+\frac{12}{2}}
+{\frac{1}{10}+\frac{1}{2}}=\frac{50}{3}\approx 16.67\text{,}\\
+\tau^2_1&=\frac{1}{\frac{1}{\tau^2_0}+\frac{1}{\sigma^2}}
+=\frac{1}{\frac{1}{10}+\frac{1}{2}}=\frac{5}{3}\approx 1.667\text{.}
+\end{align*}
+
+The distribution curves appear on the plot below.
+
+\begin{center}
+<<prob4a1,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+curve(dnorm(x, 40, sqrt(10)), from = 5, to = 50, ylim = c(0, 0.31),
+      n = 201, lty = 3, xlab = expression(mu), ylab = 'Density',
+      main = 'Prior Density, Likelihood, and Posterior Density')
+curve(dnorm(12, x, 2), lty = 2, n = 201, add = TRUE)
+curve(dnorm(x, 50/3, sqrt(5/3)), lty = 1, n = 201, add = TRUE)
+legend('topright', lty = c(3, 2, 1),
+       legend = c(expression(p(mu)),
+                  expression(paste('p(', y==12, '|', mu, ')')),
+                  expression(paste('p(', mu, '|', y==12, ')'))))
+@
+\end{center}
+
+\item %b
+
+JAGS requires precisions instead of variances or standard deviations,
+so I have defined the precisions of \(y\) and \(\mu\) as
+\(p_y=\dfrac{1}{\sigma^2}\) and \(p_\mu=\dfrac{1}{\tau_0}\).
+
+<<jagsmodel,cache=TRUE>>=
+# Variables:
+#  mu    Mean (parameter of interest)
+#  y     Data (a single observation) - specified in data argument
+#  p.y   Data precision - specified in data argument
+#  mu.0  Prior mean - specified in data argument
+#  p.mu  Prior precision specified in data argument
+jags.model <- function(){
+  # Likelihood
+  y ~ dnorm(mu, p.y)
+
+  # Prior
+  mu ~ dnorm(mu.0, p.mu)
+}
+jags.data <- list('y' = 12,
+                  'p.y' = 1/2, # = 1/sigma^2
+                  'mu.0' = 40,
+                  'p.mu' = 1/10) # = 1/tau_0^2
+@
+
+\item %c
+
+I set an initial value of \(\mu=30\) and then ran one chain for 10,000
+iterations, discarding none as burn-in. I chose the initial value
+to be far from the center of the posterior, but the sampler still
+converged immediately.
+
+<<prob4c1,echo=FALSE,results='hide',message=FALSE,out.height='0.7\\linewidth',fig.height=7,cache=TRUE>>=
+set.seed(3861)
+
+jags.init <- list(list('mu' = 30))
+jags.out <- jags(data = jags.data, parameters.to.save = 'mu',
+                 model.file = jags.model, inits = jags.init,
+                 n.chains = 1, n.iter = 10000, n.burnin = 0, n.thin = 1)
+mu.post.draws <- jags.out$BUGSoutput$sims.matrix[,'mu']
+
+layout(matrix(c(1, 3, 2, 3), nrow = 2), widths = c(1, 2, 1, 2))
+plot(mu.post.draws, xlim = c(1, 100), type = 'l',
+     xlab = 'Iteration', ylab = expression(mu),
+     main = 'The First 100 Posterior Draws')
+plot(mu.post.draws, xlim = c(2000, 3000), type = 'l',
+     xlab = 'Iteration', ylab = expression(mu),
+     main = '1,000 Posterior Draws')
+plot(mu.post.draws, type = 'l',
+     xlab = 'Iteration', ylab = expression(mu),
+     main = '10,000 Posterior Draws')
+@
+
+\pagebreak
+\item %d
+
+The following plot shows a histogram of the 10,000 McMC draws with the
+\(\mathrm{N}\left(\dfrac{50}{3}, \dfrac{5}{3}\right)\) density superimposed.
+The resemblance is uncanny.
+
+\begin{center}
+<<prob4d1,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,cache=TRUE>>=
+hist(mu.post.draws, breaks = 100, freq = FALSE,
+     xlab = expression(mu), main = 'Posterior Distribution')
+curve(dnorm(x, 50/3, sqrt(5/3)), lty = 1, n = 201, add = TRUE)
+@
+\end{center}
+
+\item %e
+
+I previously used \(\mu_0=40\), \(\tau_0^2=10\). I will now compare each
+combination of \(\mu_0\in\{-2, 40\}\) and \(\tau_0^2\in\{1, 10\}\). I chose
+the \(\mu_0=-2\) to center the prior on the other side of \(y\), but
+have it closer to \(y\) than the prior centered at \(\mu_0=40\) was. I
+chose \(\tau_0^2=1\) to strengthen the prior.
+
+I generated 10,000 draws using each prior and plotted the results on the
+histogram below. The dashed vertical line shows the observed value,
+\(y=12\), and the dotted vertical lines show the values of \(\mu_0\). Just
+as one would expect after studying the analytical formulas, the posterior
+distributions are centered between their respective prior means and 12.
+The stronger priors resulted in posteriors that remained nearer to their
+prior means.
+
+<<prob4e1,echo=FALSE,results='hide',message=FALSE,cache=TRUE>>=
+jags.data2 <- list('y' = 12,
+                   'p.y' = 1/2, # = 1/sigma^2
+                   'mu.0' = -2,
+                   'p.mu' = 1/10) # = 1/tau_0^2
+set.seed(642)
+jags.out2 <- jags(data = jags.data2, parameters.to.save = 'mu',
+                  model.file = jags.model, inits = jags.init,
+                  n.chains = 1, n.iter = 10000, n.burnin = 0, n.thin = 1)
+mu.post.draws2 <- jags.out2$BUGSoutput$sims.matrix[,'mu']
+
+jags.data3 <- list('y' = 12,
+                   'p.y' = 1/2, # = 1/sigma^2
+                   'mu.0' = 40,
+                   'p.mu' = 1) # = 1/tau_0^2
+set.seed(4362)
+jags.out3 <- jags(data = jags.data3, parameters.to.save = 'mu',
+                  model.file = jags.model, inits = jags.init,
+                  n.chains = 1, n.iter = 10000, n.burnin = 0, n.thin = 1)
+mu.post.draws3 <- jags.out3$BUGSoutput$sims.matrix[,'mu']
+
+jags.data4 <- list('y' = 12,
+                   'p.y' = 1/2, # = 1/sigma^2
+                   'mu.0' = -2,
+                   'p.mu' = 1) # = 1/tau_0^2
+set.seed(89725)
+jags.out4 <- jags(data = jags.data4, parameters.to.save = 'mu',
+                  model.file = jags.model, inits = jags.init,
+                  n.chains = 1, n.iter = 10000, n.burnin = 0, n.thin = 1)
+mu.post.draws4 <- jags.out4$BUGSoutput$sims.matrix[,'mu']
+
+hist(mu.post.draws, breaks = 50, freq = FALSE, col = '#ffffff',
+     xlim = c(-1, 40), ylim = c(0, 0.5),
+     xlab = expression(mu), main = 'Posteriors from Several Priors')
+hist(mu.post.draws2, breaks = 50, freq = FALSE, col = '#c0c0c0', add = TRUE)
+hist(mu.post.draws3, breaks = 25, freq = FALSE, col = '#808080', add = TRUE)
+hist(mu.post.draws4, breaks = 25, freq = FALSE, col = '#404040', add = TRUE)
+abline(v = c(-1, 12, 40), lty = c(3, 2, 3))
+legend('right', fill = c('#ffffff', '#c0c0c0', '#808080', '#404040'),
+       legend = c(expression(list(mu[0]==40,tau[0]^2==10)),
+                  expression(list(mu[0]==-2,tau[0]^2==10)),
+                  expression(list(mu[0]==40,tau[0]^2==1)),
+                  expression(list(mu[0]==-2,tau[0]^2==1))), bg = 'white')
+@
+
+\item %f
+
+According to the JAGS webpage, ``JAGS is Just Another Gibbs Sampler''\\
+(\verb|http://mcmc-jags.sourceforge.net/|).
+
+Gelman \& Hill say that BUGS stands for ``Bayesian Inference
+using Gibbs Sampling'' on page 11, although their capitalization implies
+that it should be abbreviated as ``BIGS.''
+
+Page xvii of the Stan user's guide (found at \verb|http://mc-stan.org/|)
+states that Stan is named for Stanislaw Ulam, a ``coinventor of Monte
+Carlo methods'' who collaborated with Nicholas Metropolis.
+
+\end{enumerate}
+
+\item %5
+
+\begin{enumerate}
+
+\item %a
+
+I will be as brief as I can, but the model is complicated and worth
+reiterating.
+
+Sinding-Larsen and Xu used straightforward Monte Carlo simulation to
+approximate the posterior distribution of their parameters. The model and
+simulation process was described in Xu and Sinding-Larsen as follows.
+
+The joint probability function is
+\begin{align*}
+p(Y, S, N, &\beta, \mu, \sigma^2)
+=p(N, \beta, \mu, \sigma^2)p(Y, S|N, \beta, \mu, \sigma^2)\\
+&=p(N)p(\beta)p(\mu)p(\sigma^2)\begin{pmatrix}N \\ n\end{pmatrix}
+\prod_{j=1}^n\frac{p(Y_j|\mu,\sigma^2)Y_j^\beta}
+{\sum_{k=j}^nY_k^\beta+\sum_{k=n+1}^NS_k^\beta}
+\prod_{j=n+1}^Np(S_j|N, \beta, \mu, \sigma^2)
+\end{align*}
+where
+\begin{itemize}
+\item \(Y_1,\dots,Y_n,S_{n+1},\dots,S_N\) are the sizes of all the oil pools
+in the study area. \(Y=(Y_1,\dots,Y_n)\) are the observed data (for pools
+that have been discovered; \(n=22\)), and \(S=(S_{n+1},\dots,S_N)\) are the
+sizes of the undiscovered pools. It is assumed that
+\(Y_1,\dots,Y_n,S_{n+1},\dots,S_N\) are independent (conditional on the
+order in which they were discovered),
+\(\log(Y_1),\dots,\log(Y_n),\log(S_{n+1}),\dots,\log(S_N)\) come from a
+\(\mathrm{N}(\mu,\sigma^2)\) population, and
+\begin{align*}
+Pr(Y_1,\dots,Y_n\text{ were the first }n\text{ discoveries}|N,\beta)
+=\begin{pmatrix}N \\ n\end{pmatrix}\prod_{j=1}^n\frac{Y_j^\beta}
+{\sum_{k=j}^nY_k^\beta+\sum_{k=n+1}^NS_k^\beta}\text{.}
+\end{align*}
+\item \(\mu\sim\mathrm{N}(2.38,0.54)\) is the mean size of all the pools,
+\item \(\sigma^2\) follows a Gamma distribution with \(E(\sigma^2)=2.89\)
+and \(Var(\sigma^2)=0.54\),
+\item \(\beta\sim\mathrm{Unif}(-0.213,-0.088)\),
+\item \(N|M,\pi\sim\mathrm{Binomial}(M,\pi)\) is the unknown total number
+of pools in the area,
+\item \(\pi\sim\mathrm{Beta}(2.30,4.28)\),
+\item and \(M-n\) is the unknown number of prospective pools yet to be
+tested. In Sinding-Larsen and Xu, it is said that the distribution of
+\(M-n\) is based on expert knowledge and satisfies
+\begin{center}
+\begin{tabular}{cccccccc}
+\(m\) & 13 & 16 & 20 & 26 & 30 & 35 & 38 \\
+\hline
+\(Pr(M-n\geq m)\) & 1.00 & 0.95 & 0.75 & 0.50 & 0.25 & 0.05 & 0.00
+\end{tabular}
+\end{center}
+but the exact form is not given.
+\end{itemize}
+
+Before simulating the posterior, they used the following Monte Carlo
+process to approximate the unconditional prior distribution of \(N\).
+\begin{enumerate}
+\item Draw \(M\) and \(\pi\).
+\item Draw \(N|M,\pi\).
+\end{enumerate}
+They squashed (our term, not theirs) over \(M\) and \(\pi\) to get \(p(N)\).
+Then they simulated the joint posterior distribution of
+\(S, N, \beta, \mu, \sigma^2\) as follows.
+\begin{enumerate}
+\item Draw \(N\), \(\beta\), \(\mu\), and \(\sigma^2\).
+\item Draw \(\log(S_{n+1}),\dots,\log(S_N)\) and compute
+\((S_{n+1}),\dots,(S_N)\).
+\item Compute the weight,
+\begin{align*}
+W=\begin{pmatrix}N \\ n\end{pmatrix}
+\prod_{j=1}^n\frac{p(Y_j|\mu,\sigma^2)Y_j^\beta}
+{\sum_{k=j}^nY_k^\beta+\sum_{k=n+1}^NS_k^\beta}\text{.}
+\end{align*}
+\end{enumerate}
+The marginal distribution of \(S_j\) was found by squashing over the other
+parameters. The marginal posterior distributions of \(N\), \(\beta\),
+\(\mu\), and \(\sigma^2\) were found by summing the \(W\) values and
+normalizing. The results were presented in histograms and cumulative
+distribution plots.
+
+\item %b
+
+They did not use an iterative algorithm, so convergence was not an issue.
+They said they took 80,000 posterior draws, which sounds like a lot. It
+is more than I ever used on a Stat 506 assignment, and certainly more than
+Andrew Gelman recommends for the situations we have studied. They do not
+explain why they used so many draws; however each draw includes a sequence
+of undiscovered pool sizes, the number of which is itself a random draw. I
+find it believable that tens or hundreds of thousands of draws are necessary
+to accurately characterize the distribution, but they did not justify whether
+80,000 is enough. Their histograms look a bit jagged, so I am not fully
+convinced that they took enough draws.
+
+\end{enumerate}
+
+\textbf{References}
+
+\begin{itemize}
+
+\item Sinding-Larsen, R., and Xu, J., 2005, Bayesian Discovery Process
+Modeling of the Lower and Middle Jurassic Play of the Halten Terrace,
+Offshore Norway, as Compared with the Previous Modeling: Natural
+Resources Research, v. 14, no. 3, p. 235-248.
+
+\item Xu, J., and Sinding-Larsen, R., 2005, How to choose priors for
+Bayesian estimation of the discovery process model: Natural Resources
+Research, v. 14, no. 3, p.211 -233.
+
+\end{itemize}
+
+\end{enumerate}
+
+\end{document}

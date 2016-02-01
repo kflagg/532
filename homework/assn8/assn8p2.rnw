@@ -1,0 +1,583 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+
+\usepackage{float}
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 8 (Part 2)}
+\author{Kenny Flagg}
+\date{October 30, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE,message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(dplyr)
+require(coda)
+
+#require(rstan)
+#rstan_options(auto_write = TRUE)
+#options(mc.cores = parallel::detectCores())
+
+logit <- function(x){return(log(x/(1-x)))}
+expit <- function(x){return(1/(1+exp(-x)))}
+
+extract <- function(x, ...) UseMethod('extract')
+extract.mcmc.list <- function(x, pars){
+  draws <- lapply(pars, function(i){unlist(x[,i])})
+  names(draws) <- pars
+  return(draws)
+}
+@
+
+\begin{enumerate}
+
+%\item %1
+
+%\begin{enumerate}
+
+%\item %a
+
+%\item %b
+
+%\item %c
+
+%\item %d
+
+%\item %e
+
+%\item %f
+
+%\end{enumerate}
+
+\setcounter{enumi}{1}
+\item %2
+
+\begin{enumerate}
+
+\item %a
+
+In his paper, Gelman proposed a new way of doing ANOVA based on defining
+a batch of effects corresponding to each level of variation and estimating
+the variance of the effects in each batch. I agree that this is a more
+intuitive and understandable way to perform ANOVA, but I am not convinced
+that it is as novel or as simple as he claims. Is there truly a difference
+between defining batches and defining a nesting structure? Is the
+``automatic'' creation of the variance structure really automatic in
+a practical sense?
+
+Gelman tried to separate the model from the design by thinking about batches.
+He commented that ``the variance components and standard errors are estimated
+from the data, without any need to specify comparisons based on the design''
+but all variables in the design must be included for the model to have the
+correct structure. I see no difference between thinking about batches and
+thinking about the nesting of the design. The correct structure my not be
+obvious, but it can be found by thinking carefully about each variable in
+the design and deciding what level it acts on. When there is no nesting,
+as in the connection times example, the new ANOVA table based on batches
+has the same structure as the traditional ANOVA table. Gelman has defined
+a new way of thinking, not a new way of modeling.
+
+I take issue with his use of the word ``automatic'' throughout the paper.
+The variance structure is defined automatically by the batches, but
+performing the analysis still requires defining the structure in a way that
+the software can work with. For both a non-statistician using canned software,
+and for a statistician using a Bayesian hierarchical model, this will
+typically mean translating the batch structure into a old-fashioned hierarchy.
+Defining the batches and defining the hierarchical variance structure are
+both tasks that require non-trivial thought, so I would argue that this is
+not automatic in any sense and I would love to ask Gelman what he thinks the
+word means to his audience.
+
+Despite the issue I discussed above, I do like this new ANOVA paradigm.
+The graphical presentation of standard errors in the ANOVA table is vastly
+more informative than the traditional table of mean squares. Estimating both
+the finite-population and infinite-population variances provides very useful
+flexibility. The terms ``varying'' and ``constant'' are more meaningful than
+``random'' and ``fixed''. I will become an advocate for Gelman's ANOVA table.
+
+\item %b
+
+I find it most natural to think directly about infection rates, and to think
+of effects as multiplicative. I defined infection rates for each variety and
+then scaled them to represent the effects of other variables. For example,
+if variety 1 has an infection rate of \(p\) in block A, and block B has
+1.2 times as many virus-carrying mites as block A, then the infection rate
+for variety 1 in block B should be \(1.2p\). I use Beta distributions to
+model probabilities, and Uniform distributions to model effects. I chose
+Uniform distributions to constrain the effects to reasonable sizes but also
+to represent uncertainty about what distribution they would really follow.
+
+The first bit of code defined the variables used later. I report this
+to give context to the rest of the code.
+<<fertsim1,echo=TRUE,cache=TRUE>>=
+set.seed(8723)
+
+# Number of leaves collected from each plot
+nLeaves <- 30
+
+# Inoculation status
+nStatus <- 2
+statusNames <- c('INOC', 'CNTL')
+
+# Nitrogen application timing treatments
+nTrts <- 3
+trtNames <- c('Early', 'Mid', 'Late')
+
+# Varieties
+nVars <- 5
+varNames <- paste('Variety', 1:nVars, sep = '')
+
+# Blocks
+nBlocks <- 6
+blockNames <- LETTERS[1:nBlocks]
+
+# Total number of observtions
+n <- nBlocks * nVars * nTrts * nStatus
+@
+
+First consider inoculated plots, where there are interesting interactions.
+There is a small amount of block-to-block variation due to the number of
+virus-carrying mites in the area. This causes rates to be multiplied by a
+Unif(0.8, 1.2) block effect that does not interact with variety or status
+(but the researchers would like to account for those interactions).
+<<fertsim2,echo=TRUE,cache=TRUE,dependson='fertsim1'>>=
+block.eff <- runif(nBlocks, 0.8, 1.2)
+names(block.eff) <- blockNames
+@
+
+Varieties 1 and 2 are from a very resistant population with mean rate of
+\(\frac{1}{20}\) and a lot of mass near 0. Varieties 3, 4, and 5 are from
+a susceptible population with mean rate of \(\frac{3}{20}\) but the rates
+are definitely positive.
+<<fertsim3,echo=TRUE,cache=TRUE,dependson='fertsim2'>>=
+var.inoc.eff <- c(rbeta(2, 1, 19), rbeta(3, 3, 17))
+names(var.inoc.eff) <- varNames
+@
+
+Infection rate is halved for early treatment, 75\% for mid treatment,
+and unaffected by late treatment. Treatment and variety do not interact.
+<<fertsim4,echo=TRUE,cache=TRUE,dependson='fertsim3'>>=
+trt.inoc <- c(0.5, 0.75, 1)
+names(trt.inoc) <- trtNames
+@
+
+Now consider uninoculated plots, where there is not much infection
+because there are few mites present. I'll use the same block adjustments as
+before (no block by status interaction). Base infection rates for the
+varieties are lower in control plots. The resistant population still has
+mass near 0 and the susceptible population still has nonzero infection rate.
+<<fertsim5,echo=TRUE,cache=TRUE,dependson='fertsim4'>>=
+var.cntl.eff <- c(rbeta(2, 1, 39), rbeta(3, 3, 37))
+names(var.cntl.eff) <- varNames
+@
+
+Treatment is less effective because there isn't as much virus exposure.
+<<fertsim6,echo=TRUE,cache=TRUE,dependson='fertsim5'>>=
+trt.cntl <- c(0.8, 0.9, 1)
+names(trt.cntl) <- trtNames
+@
+
+Next, I computed the ``true'' infection rate for each plot by multiplying
+the effects.
+<<fertsim7,echo=TRUE,cache=TRUE,dependson='fertsim6'>>=
+# It makes the most sense to me to store the infection rates in an array.
+probs <- array(numeric(0), dim = c(nTrts, nVars, nBlocks, nStatus))
+dimnames(probs) <- list(trtNames, varNames, blockNames, statusNames)
+
+for(b in blockNames){
+  for(v in varNames){
+    # Store inoculated rates
+    probs[, v, b, 2] <- block.eff[b] * var.inoc.eff[v] * trt.inoc
+
+    # Store control rates
+    probs[, v, b, 1] <- block.eff[b] * var.cntl.eff[v] * trt.cntl
+  }
+}
+@
+
+Finally, I created a data frame and drew appropriate binomial values.
+<<fertsim8,echo=TRUE,cache=TRUE,dependson='fertsim7'>>=
+# Initialize a data.frame
+data.sim <- data.frame(
+  'infected' = as.numeric(NA),
+  expand.grid(
+    'status' = factor(statusNames),
+    'nitrogen' = factor(trtNames),
+    'variety' = factor(varNames),
+    'block' = factor(blockNames)
+    )
+  )
+
+# Loop through the data frame and generate draws!
+for(i in 1:n){
+  data.sim$infected[i] <- with(
+    data.sim,
+    rbinom(1, nLeaves,
+           probs[
+             nitrogen[i],
+             variety[i],
+             block[i],
+             status[i]
+             ]
+           )
+    )
+}
+@
+
+Figure \ref{fertsim} presents the simulated data in a heatmap.
+
+\begin{figure}[h!]
+<<heatmap,echo=FALSE,cache=TRUE,dependson='fertsim',out.height='0.35\\linewidth',fig.height=3.5>>=
+# Order the dataset
+fert.ordered <- arrange(data.sim, variety, block, status, nitrogen)
+
+# Create a matrix of the arranged responses
+infected.arranged <- matrix(fert.ordered$infected, ncol = 6, byrow = TRUE)
+
+# Set up two panels, right one for a legend
+layout(t(1:2), widths = c(9, 1))
+
+# Plot the heatmap, with zeros in black and segments separating the blocks
+par(mar = c(3, 10, 6, 2)) # Set big margins
+image(z = infected.arranged, y = 1:6,
+
+      # Variety blocks are 1 unit wide, centered at 0.5, 1.5, etc
+      x = seq(0.5, 5.5, 1/6),
+
+      # Use black for 0, and use heatmap colors (red-orange-yellow-white) for 1 to 30
+      col = c('black', heat.colors(30)), zlim = c(0, 30),
+
+      # Don't automatically create axes or labels
+      xlab = '', ylab = '', yaxt = 'n', xaxt = 'n'
+      )
+
+# Use white line segments to visually separate the varieties
+segments(x0 = 1.5:4.5, y0 = 0.5, y1 = 6.5, col = 'white')
+
+# Place a title at the top, and label Varieties, treatment:status levels, and blocks around the image
+title('Infection Counts', line = 4)
+axis(3, labels = rep(levels(fert.ordered$block), 5), cex.axis = 0.75,
+
+     # Each block is plotted in a column with width 1/6, so put the labels in the middle
+     at = seq(7/12, 5 + 5/12, 1/6))
+axis(2, labels = levels(with(fert.ordered, interaction(nitrogen, status))), at = 1:6, las = 2)
+axis(1, labels = levels(fert.ordered$variety), at = 1:5)
+
+# Legend
+par(mar = c(3, 1, 6, 2))
+image(y = seq(-0.5, 30.5, 1), z = matrix(0:30, nrow = 1), axes = FALSE, ylab = '',
+      col = c('#000000', heat.colors(30)), zlim = c(0, 30))
+title('Legend', line = 1.5)
+axis(4)
+@
+\caption{Simulated infection counts.}
+\label{fertsim}
+\end{figure}
+
+\item %c
+
+The data generating process has a clear hierarchy that does not entirely
+resemble the experiment design. Infection occurs in control plots through
+a different process than in inoculated plots. The first batch of
+coefficients describes the status of being inoculated or control. The next
+most general level is that of block, so the second batch corresponds to the
+block effects within inoculated/control status. The third batch is for
+variety within block, and the final batch is for treatment within variety.
+
+The model is
+\begin{align*}
+y_{ijkl}&\sim\mathrm{Binomial}(30, \pi_{ijkl}),\\
+\pi_{ijkl}&=b_{j}\phi_{ik}t_{il},\\
+b_{j}&\sim\mathrm{Unif}(0.8, 1.2)\text{ is the effect of block }j.
+\end{align*}
+For control plots,
+\begin{align*}
+\phi_{1k}|\text{variety }k\text{ is resistant}&\sim\mathrm{Beta}(1, 39),\\
+\phi_{1k}|\text{variety }k\text{ is susceptible}&\sim\mathrm{Beta}(3, 37),\\
+t_{11}=0.8, t_{12}=0.9, t_{13}=1&\text{ are the treatment effects.}
+\end{align*}
+For inoculated plots,
+\begin{align*}
+\phi_{2k}|\text{variety }k\text{ is resistant}&\sim\mathrm{Beta}(1, 19),\\
+\phi_{2k}|\text{variety }k\text{ is susceptible}&\sim\mathrm{Beta}(3, 17),\\
+t_{21}=0.5, t_{22}=0.75, t_{23}=1&\text{ are the treatment effects.}
+\end{align*}
+I simulated the data assuming it was known which population each variety
+came from. If this is unknown, the analysis should include a prior
+distribution for the probability that a variety is resistant or susceptible.
+Most researchers would default to using a Binomial GLMM for this experiment,
+which is reasonable, but they would probably think of inoculation as a
+treatment, which leads to an incorrect nesting structure.
+
+\end{enumerate}
+
+\item %3
+
+\begin{enumerate}
+
+\item %a
+
+The model is
+\begin{align*}
+y_i|\mu,V_i&\sim\mathrm{N}(\mu,V_i),\\
+\mu&\sim\mathrm{Unif}(-\infty,\infty),\\
+V_i|\sigma^2&\sim\mathrm{Inv-}\chi^2(\nu,\sigma^2),\\
+\log(\sigma)&\sim\mathrm{Unif}(0,\infty)
+\end{align*}
+where \(i=1,\dots,n\), and \(n\) and \(\nu\) are known. The goal is
+to find the posterior distribution \(p(\mu,\sigma^2|y,V)\).
+
+For data, I drew the following 10 values from a
+\(t_{\nu=9}(\mu=20, \sigma^2=3^2)\) distribution.
+\begin{center}\begin{math}
+<<fake,echo=FALSE,results='asis'>>=
+set.seed(87235)
+n <- 10
+nu <- 9
+y <- 3 * rt(n, nu) + 20
+cat(round(y, 3), sep = ' \\quad ')
+@
+\end{math}\end{center}
+
+\item %b
+
+Most of this code sets up the variables. The actual sampler is short! I
+sampled for 300 iterations and threw out 50 as warmup. I plotted the
+posterior distributions in Figure \ref{augment}, which appears after the code.
+
+<<sampler3b1,cache=TRUE,dependson='fake'>>=
+n.chains <- 4
+n.iter <- 300
+set.seed(9723)
+
+# Initialize a list of lists to hold the draws
+gibbs1 <- replicate(n.chains, simplify = FALSE,
+                          list('V' = matrix(nrow = n.iter, ncol = n),
+                               'mu' = numeric(n.iter),
+                               'sigma' = numeric(n.iter)))
+
+# Initial values for chain 1
+gibbs1[[1]]$V[1,] <- 0.25
+gibbs1[[1]]$mu[1] <- 8
+gibbs1[[1]]$sigma[1] <- 0.5
+
+# Initial values for chain 2
+gibbs1[[2]]$V[1,] <- 0.25
+gibbs1[[2]]$mu[1] <- 32
+gibbs1[[2]]$sigma[1] <- 0.5
+
+# Initial values for chain 3
+gibbs1[[3]]$V[1,] <- 100
+gibbs1[[3]]$mu[1] <- 8
+gibbs1[[3]]$sigma[1] <- 10
+
+# Initial values for chain 4
+gibbs1[[4]]$V[1,] <- 100
+gibbs1[[4]]$mu[1] <- 32
+gibbs1[[4]]$sigma[1] <- 10
+
+# Complete conditionals
+draw.V <- function(y, n, nu, mu, sigma){
+  return(1/rgamma(n, (nu+1)/2, (nu*sigma^2+(y-mu)^2)/2))
+}
+draw.mu <- function(y, V){
+  return(rnorm(1, sum(y/V)/sum(1/V), 1/sqrt(sum(1/V))))
+}
+draw.sigma <- function(n, nu, V){
+  return(sqrt(rgamma(1, n*nu/2, nu*sum(1/V)/2)))
+}
+
+# Outer loop for the iterations
+for(i in 2:n.iter){
+  # Inner loop for the chains
+  for(j in 1:n.chains){
+    # V
+    gibbs1[[j]]$V[i,] <- with(gibbs1[[j]], draw.V(y, n, nu, mu[i-1], sigma[i-1]))
+    # Mu
+    gibbs1[[j]]$mu[i] <- draw.mu(y, gibbs1[[j]]$V[i,])
+    # Sigma
+    gibbs1[[j]]$sigma[i] <- draw.sigma(n, nu, gibbs1[[j]]$V[i,])
+  }
+}
+@
+
+\begin{figure}[h!]
+<<sampler3b2,echo=FALSE,cache=TRUE,dependson='sampler3b1'>>=
+gibbs1.mcmc <- mcmc.list(lapply(gibbs1, function(x){mcmc(data.frame(x))}))
+mu.gibbs1 <- extract(gibbs1.mcmc, 'mu')$mu[51:300]
+sigma.gibbs1 <- extract(gibbs1.mcmc, 'sigma')$sigma[51:300]
+par(mfrow = c(1, 2))
+hist(mu.gibbs1, freq = FALSE, breaks = 50, xlab = expression(mu),
+     main = expression(Posterior~Distribution~of~mu),
+     xlim = c(14, 26), ylim = c(0, 0.5))
+hist(sigma.gibbs1, freq = FALSE, breaks = 50, xlab = expression(sigma),
+     main = expression(Posterior~Distribution~of~sigma),
+     xlim = c(2, 8), ylim = c(0, 0.7))
+@
+\caption{Posterior distributions from the augmented model.}
+\label{augment}
+\end{figure}
+
+\item %c
+
+This version is no more difficult to implement than the version in part (b).
+I ran it for 300 iterations, discarded the first 20, and plotted the
+posterior distributions in Figure \ref{expand}.
+
+<<sampler3c1,cache=TRUE,dependson='fake'>>=
+n.chains <- 4
+n.iter <- 300
+set.seed(35255)
+
+# Initialize a list of lists to hold the draws
+gibbs2 <- replicate(n.chains, simplify = FALSE,
+                          list('U' = matrix(nrow = n.iter, ncol = n),
+                               'alpha' = numeric(n.iter),
+                               'mu' = numeric(n.iter),
+                               'tau' = numeric(n.iter),
+                               'sigma' = numeric(n.iter)))
+
+# Initial values for chain 1
+gibbs2[[1]]$U[1,] <- 0.25
+gibbs2[[1]]$alpha[1] <- 1
+gibbs2[[1]]$mu[1] <- 8
+gibbs2[[1]]$tau[1] <- 0.5
+gibbs2[[1]]$sigma[1] <- 0.5
+
+# Initial values for chain 2
+gibbs2[[2]]$U[1,] <- 0.25
+gibbs2[[2]]$alpha[1] <- 1
+gibbs2[[2]]$mu[1] <- 32
+gibbs2[[2]]$tau[1] <- 0.5
+gibbs2[[1]]$sigma[1] <- 0.5
+
+# Initial values for chain 3
+gibbs2[[3]]$U[1,] <- 100
+gibbs2[[3]]$alpha[1] <- 1
+gibbs2[[3]]$mu[1] <- 8
+gibbs2[[3]]$tau[1] <- 10
+gibbs2[[1]]$sigma[1] <- 10
+
+# Initial values for chain 4
+gibbs2[[4]]$U[1,] <- 100
+gibbs2[[4]]$alpha[1] <- 1
+gibbs2[[4]]$mu[1] <- 32
+gibbs2[[4]]$tau[1] <- 10
+gibbs2[[1]]$sigma[1] <- 10
+
+# Complete conditionals
+draw.U <- function(y, n, nu, mu, tau, alpha){
+  return(1/rgamma(n, (nu+1)/2, (nu*tau^2+((y-mu)/alpha)^2)/2))
+}
+draw.mu <- function(y, U, alpha){
+  return(rnorm(1, sum(y/(U*alpha^2))/sum(1/(U*alpha^2)), 1/sqrt(sum(1/(U*alpha^2)))))
+}
+draw.tau <- function(n, nu, U){
+  return(sqrt(rgamma(1, n*nu/2, nu*sum(1/U)/2)))
+}
+draw.alpha <- function(n, mu, U){
+  return(1/sqrt(rgamma(1, n/2, sum((y-mu)^2/U)/2)))
+}
+
+# Outer loop for the iterations
+for(i in 2:n.iter){
+  # Inner loop for the chains
+  for(j in 1:n.chains){
+    # U
+    gibbs2[[j]]$U[i,] <- with(gibbs2[[j]], draw.U(y, n, nu, mu[i-1], tau[i-1], alpha[i-1]))
+    # Mu
+    gibbs2[[j]]$mu[i] <- draw.mu(y, gibbs2[[j]]$U[i,], gibbs2[[j]]$alpha[i-1])
+    # Tau
+    gibbs2[[j]]$tau[i] <- draw.tau(n, nu, gibbs2[[j]]$U[i,])
+    # Alpha
+    gibbs2[[j]]$alpha[i] <- draw.alpha(n, gibbs2[[j]]$mu[i], gibbs2[[j]]$U[i,])
+    # Sigma
+    gibbs2[[j]]$sigma[i] <- gibbs2[[j]]$alpha[i] * gibbs2[[j]]$tau[i]
+  }
+}
+@
+
+\begin{figure}[h!]
+<<sampler3c2,echo=FALSE,cache=TRUE,dependson='sampler3c1'>>=
+gibbs2.mcmc <- mcmc.list(lapply(gibbs2, function(x){mcmc(data.frame(x))}))
+mu.gibbs2 <- extract(gibbs2.mcmc, 'mu')$mu[21:300]
+sigma.gibbs2 <- extract(gibbs2.mcmc, 'sigma')$sigma[21:300]
+par(mfrow = c(1, 2))
+hist(mu.gibbs2, freq = FALSE, breaks = 50, xlab = expression(mu),
+     main = expression(Posterior~Distribution~of~mu),
+     xlim = c(14, 26), ylim = c(0, 0.5))
+hist(sigma.gibbs2, freq = FALSE, breaks = 50, xlab = expression(sigma),
+     main = expression(Posterior~Distribution~of~sigma),
+     xlim = c(2, 8), ylim = c(0, 0.7))
+@
+\caption{Posterior distributions from the parameter expansion model.}
+\label{expand}
+\end{figure}
+
+\item %d
+
+Figure \ref{tracecomp} shows the first 100 simulations of \(\mu\) and
+\(\sigma\) from both models. In both, \(\mu\) converged quickly and
+exhibited little autocorrelation.
+
+The augmented model from part (b) took about 40 iterations before the draws
+of \(\sigma\) were fully mixed, and the chains show clear autocorrelation
+after that. I did not observe \(\sigma\) getting stuck near 0, but the chains
+had a tendency to wander when \(\sigma\) got large. In contrast, the
+\(\sigma\) draws from the expanded model converged in under 10 iterations
+and appear independent.
+
+Traceplots of \(\sigma\), \(\tau\), and \(\alpha\) from the second model
+appear in Figure \ref{varp}. The dependence between between \(\tau\) and
+\(\alpha\) is obvious since large values of \(\tau\) occur with small
+values of \(\alpha\) and vice versa. It seems remarkable that
+\(\sigma=\alpha\tau\) is so well behaved. I imagine it takes practice to
+see when adding parameters is useful, but it in this case it was easy
+to implement. I expect I will make good use of reparameterization in the
+future.
+
+\begin{figure}[h!]
+<<sampler3d1,echo=FALSE,cache=TRUE,dependson=c('sampler3c2','sampler3b2'),out.height='0.7\\linewidth',fig.height=7>>=
+par(mfrow = c(2, 2))
+traceplot(gibbs1.mcmc[,c('mu', 'sigma')], xlim = c(1, 100))
+traceplot(gibbs2.mcmc[,c('mu', 'sigma')], xlim = c(1, 100))
+@
+\caption{Comparison of traceplots. Top row: The augmented model from part (b).
+Bottom row: The parameter expansion model from part (c).}
+\label{tracecomp}
+\end{figure}
+
+\begin{figure}[h!]
+<<sampler3d2,echo=FALSE,cache=TRUE,dependson=c('sampler3c2','sampler3b2'),out.height='1.2\\linewidth',fig.height=12>>=
+par(mfrow = c(3, 1))
+traceplot(gibbs2.mcmc[,c('sigma', 'tau', 'alpha')])
+@
+\caption{Traceplots for the variance parameters from the augmented model.}
+\label{varp}
+\end{figure}
+
+\end{enumerate}
+
+%\item %4
+
+%\begin{enumerate}
+
+%\item %a
+
+%\item %b
+
+%\item %c
+
+%\end{enumerate}
+
+\end{enumerate}
+
+\end{document}

@@ -1547,7 +1547,7 @@ abline(v = sum(S.sim), lwd = 3, lty = 2)
 @
 \caption{Distributions of \(\max(S_{n+1},\dots,S_N)\) and
 \(\sum_{k=n+1}^NS_k\) from 10,000 posterior predictive datasets. The dashed
-vertical lines mark the values \(\max(S_{n+1},\dots,S_N=95.26)\)
+vertical lines mark the values \(\max(S_{n+1},\dots,S_N)=95.26\)
 and \(\sum_{k=n+1}^NS_k=145.2\) from the original simulated data.}
 \label{ppplot}
 \end{figure}

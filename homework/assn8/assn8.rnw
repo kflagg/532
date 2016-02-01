@@ -1,0 +1,946 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+
+\usepackage{float}
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 8 (Part 1)}
+\author{Kenny Flagg}
+\date{October 30, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE, message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(LearnBayes)
+require(coda)
+
+require(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+logit <- function(x){return(log(x/(1-x)))}
+expit <- function(x){return(1/(1+exp(-x)))}
+
+#extract <- function(x, ...) UseMethod('extract')
+extract.mcmc.list <- function(x, pars){
+  draws <- lapply(pars, function(i){unlist(x[,i])})
+  names(draws) <- pars
+  return(draws)
+}
+@
+
+\begin{enumerate}
+
+\item %1
+
+\begin{enumerate}
+
+\item %a
+
+We were not given any specific prior information, so I decided to use
+a weakly informative prior with small values for the hyperparameters. I chose
+\(\tau\sim\mathrm{Gamma}\left(\frac{1}{2}, 1\right)\),
+\(\mu|\tau\sim\mathrm{N}\left(0, \frac{1}{\tau}\right)\). Figure \ref{prior}
+shows the prior density plotted on both the \(\mu,\tau\)-space and the
+\(\mu,\sigma\)-space. Since \(\mu\) is on the logit scale, the distribution
+is disperse enough to cover most of the reasonable values. It will not be a
+problem that the prior mode is at \(\mu=0\) even though this corresponds
+to a cancer rate of 0.5.
+
+For the Gibbs sampler, I used a Metropolis-Hastings step to draw the
+\(\phi_i\). I used a \(\mathrm{N}\left(\mu, \frac{1}{\tau}\right)\)
+jumping distribution so that the Metropolis ratio simplified to
+\begin{align*}
+r=\frac{\mathrm{expit}(\phi_i^{cand})^{y_i}
+(1-\mathrm{expit}(\phi_i^{cand}))^{m_i-y_1}}
+{\mathrm{expit}(\phi_i^{curr})^{y_i}
+(1-\mathrm{expit}(\phi_i^{curr}))^{m_i-y_1}}\text{.}
+\end{align*}
+
+I ran four chains with initial values of
+\begin{enumerate}
+\item \(\tau=1\), \(\mu=0\), \(\phi_i=0; i=1,\dots,20\)\text{,}
+\item \(\tau=1\), \(\mu=-2\), \(\phi_i=-2; i=1,\dots,20\)\text{,}
+\item \(\tau=0.25\), \(\mu=0\), \(\phi_i=0; i=1,\dots,20\)\text{,}
+\item \(\tau=0.25\), \(\mu=-2\), \(\phi_i=-2; i=1,\dots,20\)\text{.}
+\end{enumerate}
+
+<<logitnorm1,echo=FALSE,cache=TRUE>>=
+# Data
+m <- c(1083, 855, 3461, 657, 1208, 1025, 527, 1668, 583, 582,
+       917, 857, 680, 917, 53637, 874, 395, 581, 588, 383)
+y <- c(0, 0, 2, 0, 1, 1, 0, 2, 1, 3, 0, 1, 1, 1, 54, 0, 0, 1, 3, 0)
+n <- length(y)
+
+# Hyperparameters
+a <- 0.5
+b <- 1
+t0 <- 0
+k0 <- 1
+
+# Initial values
+cancer.init <- list(list('phi' = rep(0, n),
+                         'mu' = 0,
+                         'tau' = 1),
+                    list('phi' = rep(-2, n),
+                         'mu' = -2,
+                         'tau' = 1),
+                    list('phi' = rep(0, n),
+                         'mu' = 0,
+                         'tau' = 0.25),
+                    list('phi' = rep(-2, n),
+                         'mu' = -2,
+                         'tau' = 0.25))
+@
+
+\begin{figure}[h!]
+<<priorplots,echo=FALSE,cache=TRUE,dependson='logitnorm1'>>=
+mu <- seq(-6, 6, by = 0.05)
+tau <- seq(0.01, 4, by = 0.01)
+mu.tau <- expand.grid('mu' = mu, 'tau' = tau)
+
+l.prior.tau <- function(theta, a, b, t, k){
+  return(dgamma(theta[2], a, b, log = TRUE) +
+           dnorm(theta[1], t, 1/sqrt(k*theta[2]), log = TRUE))
+}
+prior.tau <- matrix(apply(mu.tau, 1, l.prior.tau,
+                          a = a, b = b, t = t0, k = k0),
+                    nrow = length(mu))
+
+sig <- seq(0.01, 4, by = 0.01)
+mu.sig <- expand.grid('mu' = mu, 'sig' = sig)
+
+l.prior.sig <- function(theta, a, b, t, k){
+  return(dgamma(1/theta[2]^2, a, b, log = TRUE) +
+           log(2) - 3*log(theta[2]) +
+           dnorm(theta[1], t, theta[2]/sqrt(k), log = TRUE))
+}
+prior.sig <- matrix(apply(mu.sig, 1, l.prior.sig,
+                          a = a, b = b, t = t0, k = k0),
+                    nrow = length(mu))
+
+par(mfrow = c(1, 2))
+contour(x =  mu, y = tau, z = exp(prior.tau), drawlabels = FALSE,
+        ylab = expression(tau), xlab = expression(mu), nlevels = 20,
+        main = 'Prior Distribution for Mean and Precision')
+contour(x =  mu, y = sig, z = exp(prior.sig), drawlabels = FALSE,
+        ylab = expression(sigma), xlab = expression(mu), nlevels = 20,
+        main = 'Prior Distribution for Mean and Standard Deviation')
+@
+\caption{Left: Prior distribution of \(\mu, \tau\). Right: Prior distribution
+of \(\mu, \sigma\)}
+\label{prior}
+\end{figure}
+
+The chains converged very quickly so I used 100 iterations as warmup and
+then ran each chain for another 5,000 simulations. The code for my sampler
+appears below.
+
+<<mygibbs,echo=TRUE,cache=TRUE,dependson='logitnorm1'>>=
+n.chains <- 4
+n.iter <- 5100 # 100 warmup plus 5000 draws from each chain
+set.seed(4863)
+
+# Complete conditionals
+draw.tau <- function(mu, a, b, k0, t0, phi, n){
+  return(rgamma(1, (n+1)/2 + a, sum((phi-mu)^2)/2 + k0*(mu-t0)^2/2 + b))
+}
+draw.mu <- function(tau, a, b, k0, t0, phi, n){
+  return(rnorm(1, (n*mean(phi)+k0*t0)/(n+k0), 1/sqrt(tau*(n+k0))))
+}
+
+# Log Metropolis ratio component (I canceled stuff on paper)
+l.r.phi <- function(phi, y, m){
+  return(y*log(expit(phi))+(m-y)*log(1-expit(phi)))
+}
+draw.phi.cands <- function(mu, tau, n){
+  return(rnorm(n, mu, 1/sqrt(tau)))
+}
+
+# Initialize a list of lists to hold the draws
+cancer.gibbs <- replicate(n.chains, simplify = FALSE,
+                          list('p' = matrix(nrow = n.iter, ncol = n),
+                               'phi' = matrix(nrow = n.iter, ncol = n),
+                               'mu' = numeric(n.iter),
+                               'tau' = numeric(n.iter),
+                               'sigma' = numeric(n.iter)))
+
+# Initial values for chain 1
+cancer.gibbs[[1]]$phi[1,] <- 0
+cancer.gibbs[[1]]$mu[1] <- 0
+cancer.gibbs[[1]]$tau[1] <- 1
+
+# Initial values for chain 2
+cancer.gibbs[[2]]$phi[1,] <- -2
+cancer.gibbs[[2]]$mu[1] <- -2
+cancer.gibbs[[2]]$tau[1] <- 1
+
+# Initial values for chain 3
+cancer.gibbs[[3]]$phi[1,] <- 0
+cancer.gibbs[[3]]$mu[1] <- 0
+cancer.gibbs[[3]]$tau[1] <- 0.25
+
+# Initial values for chain 4
+cancer.gibbs[[4]]$phi[1,] <- -2
+cancer.gibbs[[4]]$mu[1] <- -2
+cancer.gibbs[[4]]$tau[1] <- 0.25
+
+# Big outer loop for the iterations
+for(i in 2:n.iter){
+  # I like to do things in parallel, so the inner loop is for the chains
+  for(j in 1:n.chains){
+    # Tau
+    cancer.gibbs[[j]]$tau[i] <- draw.tau(cancer.gibbs[[j]]$mu[i-1],
+                                         a, b, k0, t0,
+                                         cancer.gibbs[[j]]$phi[i-1,], n)
+    # Sigma
+    cancer.gibbs[[j]]$sigma[i] <- 1 / sqrt(cancer.gibbs[[j]]$tau[i])
+    # Mu
+    cancer.gibbs[[j]]$mu[i] <- draw.mu(cancer.gibbs[[j]]$tau[i],
+                                       a, b, k0, t0,
+                                       cancer.gibbs[[j]]$phi[i-1,], n)
+    # Phi
+    # These are conditionally independent, so I'll do them all at once.
+    phi.cands <- with(cancer.gibbs[[j]], draw.phi.cands(mu[i], tau[i], n))
+    cancer.gibbs[[j]]$phi[i,] <- with(cancer.gibbs[[j]],
+      ifelse(runif(n) < exp(
+        l.r.phi(phi.cands, y, m) - l.r.phi(phi[i-1,], y, m)
+        ), phi.cands, phi[i-1,]))
+    # P
+    cancer.gibbs[[j]]$p[i,] <- expit(cancer.gibbs[[j]]$phi[i,])
+  }
+}
+@
+
+<<cancer2,echo=FALSE,cache=TRUE,dependson='mygibbs'>>=
+# Make the inner lists into data frames and then make an mcmc list.
+n.warmup <- 100
+cancer.mcmc <- mcmc.list(lapply(cancer.gibbs,
+                         function(x){mcmc(data.frame(x)[-(1:n.warmup),])}))
+mu.gibbs <- extract.mcmc.list(cancer.mcmc, 'mu')$mu
+p.gibbs <- extract.mcmc.list(cancer.mcmc, paste('p', 1:20, sep = '.'))
+@
+
+<<betabin,echo=FALSE,cache=TRUE,>>=
+set.seed(9723)
+BB.loglik.fun <- function(etaK.vec, n.vec, y.vec){
+  ll.out <- sum(lchoose(n.vec, y.vec) +
+                  lbeta((etaK.vec[2]*etaK.vec[1] + y.vec),
+                        (etaK.vec[2]*(1-etaK.vec[1])+n.vec-y.vec)) -
+                  lbeta(etaK.vec[2]*etaK.vec[1], etaK.vec[2]*(1-etaK.vec[1])))
+  return(ll.out)
+}
+
+nj.vec <- c(1083, 855, 3461, 657, 1208, 1025, 527, 1668, 583, 582,
+            917, 857, 680, 917, 53637, 874, 395, 581, 588, 383)
+yj.vec <- c(0, 0, 2, 0, 1, 1, 0, 2, 1, 3, 0, 1, 1, 1, 54, 0, 0, 1, 3, 0)
+
+BB.prior.fun <- function(etaK.vec){
+  (1/(etaK.vec[1]*(1-etaK.vec[1])))*(1/((1+etaK.vec[2])^2))
+}
+
+BB.logpost1<- function(etaK.vec, n.vec, y.vec){
+  ll <- sum(lbeta(etaK.vec[2]*etaK.vec[1] +
+                    y.vec, etaK.vec[2]*(1-etaK.vec[1])+n.vec-y.vec) -
+              lbeta(etaK.vec[2]*etaK.vec[1], etaK.vec[2]*(1-etaK.vec[1])))
+  lprior <- -log(etaK.vec[1]) - log(1-etaK.vec[1]) - 2*log(1+etaK.vec[2])
+  lpost.out <- ll + lprior
+  return(lpost.out)
+}
+
+BB.logpost <- function(theta.vec, n.vec, y.vec){
+  eta <- exp(theta.vec[1])/(1+exp(theta.vec[1]))
+  K <- exp(theta.vec[2])
+  ll <- sum(lbeta(K*eta + y.vec, K*(1-eta) + n.vec - y.vec) -
+              lbeta(K*eta, K*(1-eta)))
+  log.rest <- theta.vec[2] - 2*log(1+exp(theta.vec[2]))
+  trans.log.post <- ll + log.rest
+  return(trans.log.post)
+}
+
+optim.out <- optim(c(-7, 6), BB.logpost, n.vec = nj.vec, y.vec = yj.vec,
+                   control = list(fnscale = -100), method = 'Nelder-Mead',
+                   hessian = TRUE)
+Var <- solve(-optim.out$hessian)
+
+post.prop.diff <- function(theta, n.vec, y.vec, t.params){
+  post.part <- BB.logpost(theta, n.vec = n.vec, y.vec = y.vec)
+  proposal.part <- dmt(theta, mean = t.params$m, S = t.params$var,
+                       df = t.params$df, log = TRUE)
+  d <- post.part - proposal.part
+  return(d)
+}
+
+t.params.set <- list(m = c(-6.8, 7.6), var = 2*Var, df = 4)
+
+d.out <- optim(c(-7, 7), post.prop.diff, n.vec = nj.vec, y.vec = yj.vec,
+               t.params = t.params.set, control = list(fnscale = -10))
+
+d.max <- post.prop.diff(c(-6.8899, 12.46), n.vec = nj.vec, y.vec = yj.vec,
+                        t.params = t.params.set)
+dmax <- post.prop.diff(c(-6.8868, 7.5077), n.vec = nj.vec, y.vec = yj.vec,
+                       t.params = t.params.set)
+
+n.draws <- 80000
+prop.draws <- rmt(n.draws, mean = t.params.set$m, S = t.params.set$var,
+                  df = t.params.set$df)
+
+log.post <- apply(prop.draws, 1, BB.logpost, n.vec = nj.vec, y.vec = yj.vec)
+log.g.theta <- dmt(prop.draws, mean = t.params.set$m, S = t.params.set$var,
+                   df = t.params.set$df, log = TRUE)
+
+accept.probs <- exp(log.post - log.g.theta - d.max)
+
+theta.draws <- prop.draws[runif(n.draws) <= accept.probs,]
+
+eta.draws <- exp(theta.draws[,1])/(1+exp(theta.draws[,1]))
+@
+
+I re-ran the Beta-Binomial rejection sampling example code for 80,000 draws.
+20,249 were accepted. The parameter of interest is the overall stomach cancer
+rate, which is \(\mathrm{expit}(\mu)\) in the Logit-Normal model and \(\eta\)
+in the Beta-Binomial model. Figure \ref{inf} compares the posterior
+distributions. The Logit-Normal model included an additional hierarchical
+level where the cancer rate for each city was modeled. The Beta-Binomial
+model used complete pooling, so the inferences should be somewhat different.
+
+\begin{figure}[b!]
+<<compare1,echo=FALSE,cache=TRUE,dependson=c('betabin','cancer2')>>=
+par(mfrow = c(1, 2))
+hist(expit(mu.gibbs), breaks = 100, freq = FALSE,
+     xlim = c(0, 0.0035), xlab = expression(expit(mu)),
+     main = expression(paste('20,000 Posterior Draws of ', expit(mu))))
+abline(v = quantile(expit(mu.gibbs),
+                    probs = c(0.025, 0.25, 0.5, 0.75, 0.975)),
+       lty = 2, lwd = 1)
+abline(v = mean(expit(unlist(cancer.mcmc[,'mu']))), lty = 1, lwd = 2)
+hist(eta.draws, breaks = 100, freq = FALSE, xlim = c(0, 0.0035),
+     xlab = expression(eta),
+     main = bquote(paste(.(prettyNum(length(eta.draws), big.mark = ',')),
+                         ' Posterior Draws of ', eta)))
+abline(v = quantile(eta.draws, probs = c(0.025, 0.25, 0.5, 0.75, 0.975)),
+       lty = 2, lwd = 1)
+abline(v = mean(eta.draws, lty = 1), lwd = 2)
+@
+\caption{Posterior distributions on the probability scale. The solid vertical
+lines are the posterior means. The dashed vertical lines are the 2.5, 25,
+50, 75, and 97.5 percentiles. Left: Draws of \(\mathrm{expit}(\mu)\) from
+the Logit-Normal model. Right: Draws of \(\eta\) from the Beta-Binomial model.}
+\label{inf}
+\end{figure}
+
+The Logit-Normal model estimates the stomach cancer rate for the population
+to be lower than the estimate from the Beta-Binomial model. The Logit-Normal
+partial-pooling model found the posterior mean of \(\mathrm{expit}(\mu)\)
+to be 0.00080 and the posterior median to be 0.00067. The Beta-Binomial
+model estimated the posterior mean of \(\eta\) as 0.00114 and the median
+was 0.00108.
+
+\item %b
+
+The Logit-Normal results included 20,000 posterior draws of each \(\phi_i\),
+so I implemented a posterior predictive check by drawing one
+\(\tilde{y}_i\sim\mathrm{Binomial}(m_i,\mathrm{expit}(\phi_i))\)
+for each draw of each \(\phi_i\).
+
+The Beta-Binomial model used a single \(\eta\) for all cities, so I drew
+\(\tilde{y}_i\sim\mathrm{Binomial}(m_i,\eta); i=1,\dots,20\) for each of
+the 20,249 draws of \(\eta\).
+
+To put everything on the same continuous scale, I divided each draw by the
+city's population. Figure \ref{tilde} displays the resulting posterior
+predictive distributions of \(\frac{\tilde{y}_i}{m_i}\).
+
+The complete pooling is apparent in the right panel. The distributions are
+centered near 0.001, regardless of the original data. In contrast, the left
+panel shows that the predictions form the hierarchical model were centered
+near the observed values.
+
+<<postpredlogit,echo=FALSE,cache=TRUE,dependson='cancer2'>>=
+p.gibbs <- extract.mcmc.list(cancer.mcmc, paste('p',1:20,sep='.'))
+ytilde.gibbs <- lapply(1:n, function(i){rbinom(length(p.gibbs[[i]]),
+                                               m[i], p.gibbs[[i]])/m[i]})
+@
+
+<<postpredbeta,echo=FALSE,cache=TRUE,dependson='betabin'>>=
+ytilde.bb <- lapply(1:n, function(i){rbinom(length(eta.draws),
+                                            m[i], eta.draws)/m[i]})
+@
+
+\begin{figure}[b!]
+<<postpredcomp,echo=FALSE,cache=TRUE,dependson=c('postpredlogit','postpredbeta'),out.height='0.6\\linewidth',fig.height=6>>=
+par(mfrow = c(1, 2), mar = c(5.1, 4.1, 4.1, 1.1))
+plot(y = 1:20, x = y/m, pch = 19, cex = 0.75,
+     xlim = c(0, 0.015), main = 'Posterior Predictive Distributions',
+     xlab = 'Stomach Cancer Rate', ylab = 'City', yaxt = 'n')
+segments(y0 = 1:20, x0 = sapply(ytilde.gibbs, quantile, probs = 0.005),
+         x1 = sapply(ytilde.gibbs, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:20, x0 = sapply(ytilde.gibbs, quantile, probs = 0.25),
+         x1 = sapply(ytilde.gibbs, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:20)-0.5, y1 = (1:20)+0.5, x0 = sapply(ytilde.gibbs, median))
+axis(2, at = 1:20, las = 1)
+
+par(mar = c(5.1, 1.1, 4.1, 4.1))
+plot(y = 1:20, x = y/m, pch = 19, cex = 0.75,
+     xlim = c(0, 0.015), main = 'Posterior Predictive Distributions',
+     xlab = 'Stomach Cancer Rate', ylab = '', yaxt = 'n')
+segments(y0 = 1:20, x0 = sapply(ytilde.bb, quantile, probs = 0.005),
+         x1 = sapply(ytilde.bb, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:20, x0 = sapply(ytilde.bb, quantile, probs = 0.25),
+         x1 = sapply(ytilde.bb, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:20)-0.5, y1 = (1:20)+0.5, x0 = sapply(ytilde.bb, median))
+axis(4, at = 1:20, labels = prettyNum(m, big.mark = ','), las = 1)
+mtext('At-Risk Population', 4, line = 3)
+@
+\caption{Posterior predictive distributions for each city. Dots represent
+the original observed cancer rates and vertical bars are the posterior medians.
+Horizontal bars show 50\% and 95\% posterior intervals. Left: Logit-Normal
+model. Right: Beta-Binomial model.}
+\label{tilde}
+\end{figure}
+
+\item %c
+
+Of these two particular models, I would use the hierarchical Logit-Normal
+model for inference. Since it models the individual \(\phi_i\) it allows
+both for precise inference within the same 20 cities and for inference that
+includes additional uncertainty for new cities.
+
+In general, however, I think I would prefer a multilevel version of the
+Beta-Binomial. The \(\eta,K\) parameterization is easier to understand than
+the logit-scale \(\mu,\tau\).
+
+\pagebreak
+\item %d
+
+My Stan model code appears below. I ran four chains with the same initial
+values that I used for the Gibbs sampler. Since the simulation ran blazingly
+fast, I ran each chain for 10,000 iterations and discarded the first half
+as warmup.
+
+<<logitnormstan,echo=TRUE,cache=TRUE,dependson='logitnorm1'>>=
+cancer.code <- '
+data{
+  int<lower=0> n;
+  int<lower=0> y[n];
+  int<lower=0> m[n];
+  real<lower=0> a;
+  real<lower=0> b;
+  real t0;
+  real<lower=0> k0;
+}
+
+parameters{
+  vector[n] phi;
+  real mu;
+  real<lower=0> tau;
+}
+
+transformed parameters{
+  real sigma;
+  vector<lower=0, upper=1>[n] p;
+  sigma <- 1 / sqrt(tau);
+  for(i in 1:n){
+    p[i] <- inv_logit(phi[i]);
+  }
+}
+
+model{
+  for(i in 1:n){
+    phi[i] ~ normal(mu, sigma);
+    y[i] ~ binomial(m[i], p[i]);
+  }
+  tau ~ gamma(a, b);
+  mu ~ normal(t0, sigma / sqrt(k0));
+}
+'
+@
+
+<<logitnormstand,echo=TRUE,cache=TRUE,dependson='logitnorm1'>>=
+cancer.data <- list('n' = n,
+                    'y' = y,
+                    'm' = m,
+                    'a' = a,
+                    'b' = b,
+                    't0' = t0,
+                    'k0' = k0)
+
+cancer.stan <- stan_model(model_code = cancer.code, model_name = 'cancer')
+@
+
+<<cancersamp,echo=FALSE,cache=TRUE,dependson=c('logitnormstan','logitnormstand')>>=
+cancer.samp <- sampling(cancer.stan, chains = 4, iter = 10000,
+                        data = cancer.data, init = cancer.init, seed = 8623)
+mu.stan <- extract(cancer.samp)$mu
+p.stan <- extract(cancer.samp, pars = 'p')$p
+@
+
+\pagebreak
+\item %e
+
+Figures \ref{stanres} and \ref{stancomp} compare the
+posterior distributions of \(\mu\) and \(\pi_i\) from the Gibbs sampler
+and from Stan. They are practically identical.
+
+\begin{figure}[h!]
+<<compare2,echo=FALSE,warning=FALSE,message=FALSE,cache=TRUE,dependson=c('cancersamp','cancer2')>>=
+par(mfrow = c(1, 2))
+hist(expit(mu.gibbs), breaks = 100, freq = FALSE,
+     xlim = c(0, 0.0035), xlab = expression(expit(mu)),
+     main = '20,000 Gibbs Simulations')
+abline(v = quantile(expit(mu.gibbs),
+                    probs = c(0.025, 0.25, 0.5, 0.75, 0.975)),
+       lty = 2, lwd = 1)
+abline(v = mean(expit(mu.gibbs)), lty = 1, lwd = 2)
+hist(expit(mu.stan), breaks = 100, freq = FALSE,
+     xlim = c(0, 0.0035), xlab = expression(expit(mu)),
+     main = '20,000 Stan Simulations')
+abline(v = quantile(expit(mu.stan), probs = c(0.025, 0.25, 0.5, 0.75, 0.975)),
+       lty = 2, lwd = 1)
+abline(v = mean(expit(mu.stan)), lty = 1, lwd = 2)
+@
+\caption{Posterior distributions of \(\mu\) on the probability scale. The
+solid vertical lines are the posterior means. The dashed vertical lines are
+the 2.5, 25, 50, 75, and 97.5 percentiles.}
+\label{stanres}
+\end{figure}
+
+\begin{figure}[h!]
+<<compare3,echo=FALSE,cache=TRUE,dependson=c('cancersamp','cancer2'),out.height='0.6\\linewidth',fig.height=6>>=
+par(mfrow = c(1, 2), mar = c(5.1, 4.1, 4.1, 1.1))
+plot(y = 1:20, x = y/m, pch = 19, cex = 0.75,
+     xlim = c(0, 0.015), main = 'Posterior Distributions from Gibbs Sampling',
+     xlab = expression(pi[i]), ylab = 'City', yaxt = 'n')
+segments(y0 = 1:20, x0 = sapply(p.gibbs, quantile, probs = 0.005),
+         x1 = sapply(p.gibbs, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:20, x0 = sapply(p.gibbs, quantile, probs = 0.25),
+         x1 = sapply(p.gibbs, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:20)-0.5, y1 = (1:20)+0.5, x0 = sapply(p.gibbs, median))
+axis(2, at = 1:20, las = 1)
+
+par(mar = c(5.1, 1.1, 4.1, 4.1))
+plot(y = 1:20, x = y/m, pch = 19, cex = 0.75,
+     xlim = c(0, 0.015), main = 'Posterior Distributions from Stan',
+     xlab = expression(pi[i]), ylab = '', yaxt = 'n')
+segments(y0 = 1:20, x0 = apply(p.stan, 2, quantile, probs = 0.005),
+         x1 = apply(p.stan, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:20, x0 = apply(p.stan, 2, quantile, probs = 0.25),
+         x1 = apply(p.stan, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:20)-0.5, y1 = (1:20)+0.5, x0 = apply(p.stan, 2, median))
+@
+\caption{Posterior distributions of the \(\pi_i\). Dots represent the
+observed cancer rates and vertical bars are the posterior medians. Horizontal
+bars show 50\% and 95\% posterior intervals.}
+\label{stancomp}
+\end{figure}
+
+%\item %f
+
+\end{enumerate}
+
+%\item %2
+
+%\begin{enumerate}
+
+%\item %a
+
+%\item %b
+
+%\item %c
+
+%\end{enumerate}
+
+%\item %3
+
+%\begin{enumerate}
+
+%\item %a
+
+%\item %b
+
+%\item %c
+
+%\item %d
+
+%\end{enumerate}
+
+\pagebreak
+\setcounter{enumi}{3}
+\item %4
+
+\begin{enumerate}
+
+\item %a
+
+I worked through the HMC exercise before I started reading the sections.
+While reading, I found it helpful to picture a ball rolling around on a
+surface over a two-dimensional parameter space. It took several readings
+for me to understand that the intermediate \(\theta\) values during the
+leapfrog steps are not saved. My understanding is now that the HMC algorithm
+is much like a Metropolis sampler where candidates are generated by randomly
+perturbing a particle's momentum and then following its trajectory through
+the parameter space.
+
+I tried not to think too deeply about physics, tuning, or local
+adaptation. I did think a bit about randomly varying \(\epsilon\) and
+\(L\). It seems like the Hamiltonian sampler will share the Gibbs sampler's
+problems with disjoint parameter spaces, but I wonder if allowing a large
+\(\epsilon\) to occur would be an good way to let the chain jump between
+disjoint regions.
+
+I did not find Section 12.5 to be very helpful, but if I find myself writing
+an HMC sampler I will certainly return to it for guidance.
+
+\item %b
+
+The visual aid was helpful, and I found it easy to picture higher-dimensional
+examples in my head.
+
+I ran through the exercise once, read the sections, and then returned to
+the exercise. At some point after running the roll function the second time,
+I came to understood that it only demonstrated one iteration of the sampler.
+When I find the time, I want to extend the demonstration to include several
+iterations with additional random draws of \(\phi\).
+
+Below are the functions I wrote for the introduction exercise. I plotted the
+posterior curve in Figure \ref{hmc}.
+
+<<densgrad>>=
+phi.post <- function(phi, y, n, mu, sigma){
+  return(exp(phi)^y * (1+exp(phi))^(-n) * exp(-((phi-mu)^2)) / (2*sigma^2))
+}
+
+phi.neglog.gradient <- function(phi, y, n, mu, sigma){
+  return(-y+n*exp(phi)/(1+exp(phi))+(phi-mu)/(sigma^2))
+}
+@
+
+\begin{figure}[h!]
+<<plot,echo=FALSE>>=
+par(mfrow = c(1, 2))
+curve(phi.post(x, 5, 10, 0, 2), from = -2, to = 2,
+      main = 'Posterior Distrbution', xlab = expression(phi),
+      ylab = expression(paste('p(', phi,'|y)')))
+curve(-log(phi.post(x, 5, 10, 0, 2)), from = -2, to = 2,
+      main = 'Negative Log Posterior',
+      xlab = expression(phi),
+      ylab = expression(paste(-log,'(p(', phi, '|y))')))
+@
+\caption{The posterior distribution for the HMC exercise.}
+\label{hmc}
+\end{figure}
+
+<<rolling,echo=FALSE,eval=FALSE>>=
+source('roll.R')
+roll(0, phi.neglog.gradient, phi.post)
+@
+
+\item %c
+
+I first ran the Normal example. Initially I ran it as is, saw that Stan
+was working, and moved on. I later came back and compared the three
+different versions of the model code. The results had no differences that
+I noticed. The \verb|increment_log_prob(-theta^2 / 2)| version won my
+favor as the most interesting way to code the model. Figure \ref{normdraws}
+shows some results of the \verb|increment_log_prob(-theta^2 / 2)| model.
+
+<<stannormmod,echo=FALSE,cache=TRUE>>=
+norm1.code <- '
+data{
+}
+
+parameters{
+  real theta;
+}
+
+transformed parameters{
+}
+
+model{
+  increment_log_prob(-theta^2 / 2);
+}
+'
+norm2.code <- '
+data{
+}
+
+parameters{
+  real theta;
+}
+
+transformed parameters{
+}
+
+model{
+  theta ~ normal(0, 1);
+}
+'
+norm3.code <- '
+data{
+}
+
+parameters{
+  real theta;
+}
+
+transformed parameters{
+}
+
+model{
+  increment_log_prob(normal_log(theta, 0, 1));
+}
+'
+
+norm1.stan <- stan_model(model_code = norm1.code, model_name = 'normal1')
+@
+
+<<stannormsamp,echo=FALSE,cache=TRUE,dependson='stannormmod'>>=
+norm1.samp <- sampling(norm1.stan, chains = 4, warmup = 100, iter = 250100, seed = 7823)
+theta <- extract(norm1.samp)$theta
+@
+
+\begin{figure}[h!]
+\begin{center}
+<<stannormhist,echo=FALSE,cache=TRUE,dependson='stannormsamp',out.width='0.6\\linewidth',fig.width=6>>=
+hist(theta, freq = FALSE, breaks = 100,
+     main = paste(prettyNum(length(theta), big.mark = ','),
+                  'Standard Normal Draws'),
+     xlab = expression(theta), ylab = expression(p(theta)))
+curve(dnorm(x, 0, 1), add = TRUE)
+@
+\caption{Histogram of Stan draws with standard normal curve.}
+\label{normdraws}
+\end{center}
+\end{figure}
+
+<<badlmmod,echo=FALSE,cache=TRUE>>=
+badlm.code <- '
+data{
+    int<lower=0> N;
+    int<lower=0> p;
+    vector[N] y;
+    matrix[N, p] x;
+}
+
+parameters{
+    vector[p] beta;
+    real<lower=0> sigma;
+}
+
+model{
+    beta[1] ~ normal(100, 1);
+    y ~ normal(x * beta, sigma);
+}
+'
+
+data(mtcars)
+cars.lm <- lm(mpg ~ hp + cyl + wt, mtcars)
+
+cars.data <- with(mtcars, list(y = mpg,
+                               x = cbind(rep(1, length(mpg)), hp, cyl, wt),
+                               N = length(mpg),
+                               p = 4))
+
+badlm.stan <- stan_model(model_code = badlm.code, model_name = 'badlm')
+@
+
+<<badlmsamp,echo=FALSE,cache=TRUE,dependson='badlmmod'>>=
+badlm.samp <- sampling(badlm.stan, chains = 4, iter = 2000, data = cars.data, seed = 2638)
+@
+
+<<goodlmmod,echo=FALSE,cache=TRUE>>=
+goodlm.code <- '
+data{
+  int<lower=0> N;
+  int<lower=0> p;
+  vector[N] y;
+  matrix[N, p] x;
+}
+
+parameters{
+  vector[p] beta;
+  real<lower=0> sigma;
+}
+
+model{
+  for(i in 1:p){
+      beta[i] ~ normal(0, 100);
+  }
+  y ~ normal(x * beta, sigma);
+}
+'
+
+goodlm.stan <- stan_model(model_code = goodlm.code, model_name = 'goodlm')
+@
+
+<<goodlmsamp,echo=FALSE,cache=TRUE,dependson='goodlmmod'>>=
+goodlm.samp <- sampling(goodlm.stan, chains = 4, iter = 2000, data = cars.data, seed = 3462)
+@
+
+The first thing I noticed about the linear model example was that it didn't
+work, as shown by the incorrect estimates in Table \ref{lmcomp}. As soon
+as I looked at the model code I noticed that there was an
+\(\mathrm{N}(100, 1)\) prior on the intercept, and none of the other
+parameters had priors specified. I placed vague \(\mathrm{N}(0, 100)\)
+priors on all of the coefficients and got results that match the
+\verb|lm| results.
+
+\begin{table}[h!]
+\begin{center}\begin{tabular}{l|rr|rr|rr}
+& \multicolumn{2}{c|}{\texttt{lm} Results} &
+\multicolumn{2}{c|}{Example Stan Results} &
+\multicolumn{2}{c}{My Stan Results} \\
+& Estimate & SE &
+Posterior Mean & Posterior SD &
+Posterior Mean & Posterior SD \\
+\hline
+<<lmtab,echo=FALSE,cache=TRUE,dependson=c('badlmsamp','goodlmsamp'),results='asis'>>=
+lmests <- coef(cars.lm)
+lmses <- arm::se.coef(cars.lm)
+badmeans <- apply(extract(badlm.samp)$beta, 2, mean)
+badses <- apply(extract(badlm.samp)$beta, 2, sd)
+goodmeans <- apply(extract(goodlm.samp)$beta, 2, mean)
+goodses <- apply(extract(goodlm.samp)$beta, 2, sd)
+
+for(i in 1:4){
+  cat(names(lmests)[i], '&',
+      round(lmests[i], 2), '&',
+      round(lmses[i], 2), '&',
+      round(badmeans[i], 2), '&',
+      round(badses[i], 2), '&',
+      round(goodmeans[i], 2), '&',
+      round(goodses[i], 2), '\\\\ \n')
+}
+cat('Residual SE &',
+    round(summary(cars.lm)$sigma, 2), '& &',
+    round(mean(extract(badlm.samp)$sigma), 2), '&',
+    round(sd(extract(badlm.samp)$sigma), 2), '&',
+    round(mean(extract(goodlm.samp)$sigma), 2), '&',
+    round(sd(extract(goodlm.samp)$sigma), 2))
+@
+\end{tabular}\end{center}
+\caption{Comparison of an \texttt{lm} fit, the example Stan model, and my
+Stan model}
+\label{lmcomp}
+\end{table}
+
+<<censmod,echo=FALSE,cache=TRUE>>=
+cens.code <- '
+data{
+  int<lower=0> N;
+  int<lower=0> Ncens;
+  vector<lower=0>[N-Ncens] y;
+  real<lower=0> C;
+}
+
+parameters{
+  real<lower=0> lambda;
+}
+
+transformed parameters{
+  real<lower=0> theta;
+  theta <- 1 / lambda;
+}
+
+model{
+  for (i in 1:(N-Ncens))
+  {
+    y[i] ~ exponential(lambda);
+  }
+  increment_log_prob(Ncens * exponential_ccdf_log(C, lambda));
+}
+'
+
+set.seed(98752)
+
+N <- 100
+y <- rexp(N, 1/200)
+C <- 250
+
+idx <- which(y > C)
+yobs <- y[-idx]
+Ncens <- length(idx)
+
+cens_data <- list(y = yobs, N = N, Ncens = Ncens, C = C)
+
+cens.stan <- stan_model(model_code = cens.code, model_name = 'censored')
+@
+
+<<censsamp,echo=FALSE,cache=TRUE,dependson='censmodel'>>=
+cens.samp <- sampling(cens.stan, chains = 4, iter = 2000, data = cens_data, seed = 3266)
+lambda <- extract(cens.samp)$lambda
+@
+
+When I ran the censored data example, I got warning messages saying that
+an inverse scale parameter was zero. The posterior draws ranged from about
+0.003 to 0.007, which seemed like suspiciously little variation.
+
+In order to figure out what was going on, I found the posterior distribution
+analytically. For a single observation \(y_i\),
+\(p(y_i|\lambda)=\lambda e^{-\lambda y_i}\) and
+\(Pr(y_i\geq C|\lambda)=e^{-\lambda C}\). Then if \(p(\lambda)\propto 1\)
+and the last \(N_{cens}\) of the \(y_i\) are censored, the posterior
+distribution is
+\begin{align*}
+p(\lambda|y,N_{cens})\propto\lambda^{N-N_{cens}}
+e^{-\lambda\left(\sum_{i=1}^{N-N_{cens}}y_i+CN_{cens}\right)}
+\end{align*}
+which is
+\(\mathrm{Gamma}\left(N+1,\sum_{i=1}^{N-N_{cens}}y_i+CN_{cens}\right)\).
+In one run of the example model with \(N=100\) and \(C=250\), I got
+\(N_{cens}\) =
+<<,echo=FALSE,results='asis'>>=
+cat(Ncens)
+@
+and \(\sum_{i=1}^{N-N_{cens}}y_i\) =
+<<,echo=FALSE,results='asis'>>=
+cat(prettyNum(sum(yobs), big.mark = ','), '.', sep = '')
+@
+Figure \ref{bulbs} shows that the
+<<,echo=FALSE,results='asis'>>=
+cat('Gamma(', N+1, ', ', prettyNum(sum(yobs)+C*Ncens, big.mark = ','), ')', sep = '')
+@
+density curve matches the posterior draws. The model was working fine; the
+data lead to a very precise posterior distribution.
+
+Debugging these examples was a fantastic way to learn how to use Stan. I had
+to go through the language reference and get to know the different data types
+and look up the cryptic function names. (It turns out that
+\verb|increment_log_prob| does exactly what its name says, but it was good
+to learn that \verb|exponential_ccdf_log| gives \(\log(Pr(Y>y|\beta))\)
+for \(Y\sim\mathrm{Expon}(\beta)\).)
+
+I decided that I like Stan very much. The simulations run quickly and I
+appreciate the flexibility of directly incrementing the log probability.
+My big question is, when there are many ways to do one simple thing (as
+in the Normal example), how do I decide which is best?
+
+\begin{figure}[h!]
+<<censplots,echo=FALSE,cache=TRUE,dependson='censsamp'>>=
+par(mfrow = c(1, 2))
+hist(y, freq = FALSE, breaks = 50,
+     main = expression(Lifetimes~Drawn~From~lambda==frac(1,200)))
+hist(lambda, freq = FALSE, breaks = 50, xlab = expression(lambda),
+     main = expression(Posterior~Distribution~of~lambda))
+curve(dgamma(x, N-Ncens+1, sum(yobs)+Ncens*C), add = TRUE)
+@
+\caption{Left: 100 Lightbulb lifetimes drawn from
+\(\mathrm{Expon}\left(\frac{1}{200}\right)\).
+Right: 4,000 posterior draws of \(\lambda\) with the analytical
+density curve.}
+\label{bulbs}
+\end{figure}
+
+\end{enumerate}
+
+\end{enumerate}
+
+\end{document}

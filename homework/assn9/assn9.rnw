@@ -1,0 +1,1850 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+\usepackage{afterpage}
+
+\usepackage{float}
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 9}
+\author{Kenny Flagg}
+\date{November 4, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE,message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(LearnBayes)
+require(mvtnorm)
+require(QuantileEquivalenceMCMC)
+require(gridExtra)
+require(pscl)
+require(rstan)
+rstan_options(auto_write = TRUE)
+options(mc.cores = parallel::detectCores())
+
+logit <- function(x){return(log(x/(1-x)))}
+expit <- function(x){return(1/(1+exp(-x)))}
+
+#extract <- function(x, ...) UseMethod('extract')
+extract.mcmc.list <- function(x, pars){
+  draws <- lapply(pars, function(i){unlist(x[,i])})
+  names(draws) <- pars
+  return(draws)
+}
+require(coda)
+
+xtable.heidel.diag <- function(x, digits = c(0, 0, 0, 3, 0, 3, 3), ...){
+  y <- data.frame(matrix(x, ncol = 6))
+  rownames(y) <- if (is.null(rownames(x)))
+    paste("[,", 1:nrow(x), "]", sep = "")
+  else rownames(x)
+  colnames(y) <- c('Stationarity Test', 'Start Iter.', 'p-value',
+                   'Halfwidth Test', 'Mean', 'Halfwidth')
+  y[,c(1, 4)] <- ifelse(x[,c(1, 4)], 'passed', 'failed')
+  return(xtable(y, digits = digits, ...))
+}
+@
+
+\begin{enumerate}
+
+\item %1
+
+\begin{enumerate}
+
+\item %a
+
+I feel like I should report more than just sample path plots so I've
+also included histograms and the code to generate the chains for each
+scenario.
+
+\begin{enumerate}
+
+\item Scenario 1: These chains are well-behaved and converged.
+
+<<scen1>>=
+set.seed(8914)
+chains1 <- mcmc.list(replicate(3, mcmc(rnorm(1000, 0, 1)), simplify = FALSE))
+@
+
+<<trace1,echo=FALSE,out.height='0.35\\linewidth',fig.height=3.5>>=
+layout(matrix(1:2, ncol = 2), widths = c(2, 1))
+traceplot(chains1, col = 2:4, main = 'Trace of three N(0,1) chains')
+hist(extract.mcmc.list(chains1, 1)[[1]], freq = FALSE, breaks = 50,
+     main = 'Histogram for Scenario 1', xlab = expression(theta))
+@
+
+\item Scenario 2: These chains are very slowly mixing.
+
+<<scen2>>=
+set.seed(2532)
+chains2 <- mcmc.list(mcmc(rnorm(1000, -1, 1)),
+                     mcmc(rnorm(1000, 0, 1)),
+                     mcmc(rnorm(1000, 1, 1)))
+@
+
+<<trace2,echo=FALSE,out.height='0.35\\linewidth',fig.height=3.5>>=
+layout(matrix(1:2, ncol = 2), widths = c(2, 1))
+traceplot(chains2, col = 2:4,
+          main = 'Trace of N(-1,1), N(0,1), and N(1,1) chains')
+hist(extract.mcmc.list(chains2, 1)[[1]], freq = FALSE, breaks = 50,
+     main = 'Histogram for Scenario 2', xlab = expression(theta))
+@
+
+\pagebreak
+\item Scenario 3: These chains have converged to the stationary distribution,
+but the parameters are strongly correlated.
+
+<<scen3>>=
+set.seed(89362)
+mvchain <- function(n){
+  x <- rmvnorm(n, rep(0, 3), diag(0.2, 3) + 0.8)
+  colnames(x) <- paste('theta', 1:3, sep = '')
+  return(mcmc(x))
+}
+chains3 <- mcmc.list(replicate(3, mvchain(1000), simplify = FALSE))
+@
+
+<<trace3,echo=FALSE,out.height='\\linewidth',fig.height=8,fig.width=8>>=
+layout(matrix(1:6, ncol = 2), widths = c(2, 1))
+traceplot(chains3[,'theta1'], col = 2:4,
+          main = expression(bold(Trace~of~theta[1])))
+traceplot(chains3[,'theta2'], col = 2:4,
+          main = expression(bold(Trace~of~theta[2])))
+traceplot(chains3[,'theta3'], col = 2:4,
+          main = expression(bold(Trace~of~theta[3])))
+hist(extract.mcmc.list(chains3, 1)[[1]], freq = FALSE, breaks = 50,
+     main = expression(Histogram~of~theta[1]), xlab = expression(theta[1]))
+hist(extract.mcmc.list(chains3, 2)[[1]], freq = FALSE, breaks = 50,
+     main = expression(Histogram~of~theta[2]), xlab = expression(theta[2]))
+hist(extract.mcmc.list(chains3, 3)[[1]], freq = FALSE, breaks = 50,
+     main = expression(Histogram~of~theta[3]), xlab = expression(theta[3]))
+@
+
+\pagebreak
+\item Scenario 4: These chains are not converging.
+
+<<scen4>>=
+set.seed(3624)
+chains4 <- mcmc.list(replicate(3, mcmc(diffinv(rnorm(999, 0, 1))), simplify = FALSE))
+@
+
+<<trace4,echo=FALSE,out.height='0.35\\linewidth',fig.height=3.5>>=
+layout(matrix(1:2, ncol = 2), widths = c(2, 1))
+traceplot(chains4, col = 2:4, main = 'Trace of three slow random walks')
+hist(extract.mcmc.list(chains4, 1)[[1]], freq = FALSE, breaks = 50,
+     main = 'Histogram for Scenario 4', xlab = expression(theta))
+@
+
+\item Scenario 5: These chains have converged to the stationary distribution,
+but have high autocorrelation.
+
+<<scen5>>=
+set.seed(4532)
+chains5 <- mcmc.list(replicate(3,
+             mcmc(filter(rnorm(1000), filter = rep(1, 10), circular = TRUE)),
+             simplify = FALSE))
+@
+
+<<trace5,echo=FALSE,out.height='0.35\\linewidth',fig.height=3.5>>=
+layout(matrix(1:2, ncol = 2), widths = c(2, 1))
+traceplot(chains5, col = 2:4,
+          main = 'Trace of three chains with heavy autocorrelation')
+hist(extract.mcmc.list(chains5, 1)[[1]], freq = FALSE, breaks = 50,
+     main = 'Histogram for Scenario 5', xlab = expression(theta))
+@
+
+\end{enumerate}
+
+\item %b
+
+I have \texttt{coda} version 0.16-1, which computes \(\widehat{R}\) and
+\(n_\mathrm{eff}\) differently from the methods described in the text.
+
+The \texttt{gelman.diag} help page and page 284 of BDA3 agree that
+the estimated posterior variance is
+\begin{align*}
+\widehat{\mathrm{var}}^+(\psi|y)=\frac{n-1}{n}W+\frac{1}{n}B
+\end{align*}
+where \(W\) and \(B\) are, respectively, the within-chain and between
+chain sample variances. The formulas for \(\widehat{R}\) itself differ.
+On page 285, the book gives the form
+\begin{align*}
+\widehat{R}=\sqrt{\frac{\widehat{\mathrm{var}}^+(\psi|y)}{W}}\text{,}
+\end{align*}
+while the \texttt{gelman.diag} function computes
+\begin{align*}
+\widehat{R}
+=\sqrt{\frac{(d+3)\widehat{\mathrm{var}}^+(\psi|y)}{(d+1)W}}\text{,}
+\end{align*}
+where
+\begin{align*}
+d=\frac{2\left(\widehat{\mathrm{var}}^+(\psi|y)\right)^2}
+{\mathrm{Var}\left(\widehat{\mathrm{var}}^+(\psi|y)\right)}
+\end{align*}
+is a method of moments estimator of the degrees of freedom. When \(d\) is
+small, the \(\widehat{R}\) values will differ.
+
+On pages 286-287, the textbook describes estimating the effective sample
+size as
+\begin{align*}
+\hat{n}_\mathrm{eff}=\frac{mn}{1+2\sum_{t=1}^T\widehat{\rho_t}}\text{,}
+\end{align*}
+where \(\widehat{\rho}_t\) is the estimated autocorrelation for lag \(t\)
+and \(T\) is set so that the sum stops when the autocorrelation estimates
+become too noisy. The help page for \texttt{effectiveSize} is vague and
+unhelpful, but I looked at the code for the function and saw that it
+computes
+\begin{align*}
+n_\mathrm{eff}=\frac{n\mathrm{Var}(\psi)}{S(0)}\text{.}
+\end{align*}
+\(S(0)\) is the spectral density at frequency 0, estimated by the
+\texttt{spectrum0.ar} function which in turn fits autoregressive models.
+I don't know enough about time series to understand any of that last
+sentence, but I think it is reasonable to assume that the BDA3 method
+and the \texttt{coda} method are similar but not equivalent.
+
+\item %c
+
+The \(\widehat{R}\) and \(n_\mathrm{eff}\) values appear in Table \ref{rhats}.
+The default behavior of the \texttt{gelman.diag} function is to discard the
+first half of each chain. There is no reason to do that for these examples,
+so I had it use the full chains.
+
+<<diags,echo=FALSE,results='asis'>>=
+diags <- data.frame(
+    'Rhat' = c(gelman.diag(chains1, autoburnin = FALSE)$psrf[1],
+               gelman.diag(chains2, autoburnin = FALSE)$psrf[1],
+               gelman.diag(chains3, autoburnin = FALSE)$psrf[,1],
+               gelman.diag(chains4, autoburnin = FALSE)$psrf[1],
+               gelman.diag(chains5, autoburnin = FALSE)$psrf[1]),
+    'n_eff' = c(effectiveSize(chains1),
+                effectiveSize(chains2),
+                effectiveSize(chains3),
+                effectiveSize(chains4),
+                effectiveSize(chains5))
+  )
+colnames(diags) <- c('\\(\\widehat{R}\\)', '\\(n_\\mathrm{eff}\\)')
+rownames(diags) <- c('Scenario 1',
+                     'Scenario 2',
+                     'Scenario 3, \\(\\theta_1\\)',
+                     'Scenario 3, \\(\\theta_2\\)',
+                     'Scenario 3, \\(\\theta_3\\)',
+                     'Scenario 4',
+                     'Scenario 5')
+print(xtable(diags, align = 'lrr', digits = c(0, 4, 0), label = 'rhats',
+             caption = 'PSRF values and effective sample sizes.'),
+      sanitize.text.function = function(x){return(x)},
+      caption.placement = 'bottom', table.placement = 'h!')
+@
+
+\item %d
+
+This was good excuse to get to know the diagnostics I've been assigned
+for the one-pagers. The Heidelberger and Welch diagnostic works on one
+single chain, so for each scenario I concatenated the three chains into
+one in the order \((\text{Chain}_1, \text{Chain}_2, \text{Chain3})\).
+I ran the \texttt{heidel.diag} function from \texttt{coda} with
+\(\alpha=0.05\) for the stationarity test and \(\epsilon=5\) as the
+required halfwidth ratio. I collected the results on the next page in
+Table \ref{hw}.
+
+<<hw1,echo=FALSE,results='asis'>>=
+join1 <- mcmc(unlist(chains1))
+join2 <- mcmc(unlist(chains2))
+join3 <- mcmc(rbind(chains3[[1]], chains3[[2]], chains3[[3]]))
+join4 <- mcmc(unlist(chains4))
+join5 <- mcmc(unlist(chains5))
+
+heidels <- data.frame(rbind(heidel.diag(join1, eps = 5),
+                            heidel.diag(join2, eps = 5),
+                            heidel.diag(join3, eps = 5),
+                            heidel.diag(join4, eps = 5),
+                            heidel.diag(join5, eps = 5)),
+                      row.names = c('Scenario 1',
+                                    'Scenario 2',
+                                    'Scenario 3, \\(\\theta_1\\)',
+                                    'Scenario 3, \\(\\theta_2\\)',
+                                    'Scenario 3, \\(\\theta_3\\)',
+                                    'Scenario 4',
+                                    'Scenario 5'))
+heidels$stest <- ifelse(heidels$stest, 'Passed', 'Failed')
+heidels$htest <- ifelse(heidels$htest, 'Passed', 'Failed')
+colnames(heidels) <- c('Stationarity Test', 'Start Iter.', 'p-value',
+                       'Halfwidth Test', 'Mean', 'Halfwidth')
+print(xtable(heidels, align = 'lcrrcrr', digits = c(0, 0, 0, 3, 0, 3, 3),
+             caption = 'Heidelberger and Welch results using \\(\\epsilon = 5\\) and \\(\\alpha=0.05\\).', label = 'hw'),
+      sanitize.text.function = function(x){return(x)})
+@
+
+Michael provided his \texttt{QuantileEquivalenceMCMC} library. Quantile
+equivalence plots for \(p=0.025\), 0.5, and 0.975 are presented in
+Figure \ref{qeplots} on page \pageref{qeplots}. The ``converged'' or
+``not converged'' text was generated from output of the \texttt{qed}
+function. I will consider chains converged if the empirical probabilities
+are within \(b=0.025\) of the truth, so I chose \(\epsilon=0.021\) and
+\(\alpha=0.05\).
+
+\item %e
+
+I consider Scenarios 1, 3, and 5 to be converged, and Scenarios 2 and 4
+to be unconverged. \(\widehat{R}\) performed well, and QED worked
+for tail probabilities. Other results were mixed.
+
+Scenarios 2 and 4 had large \(\widehat{R}\) values; the others all had
+\(\widehat{R}\) values near 1. If we follow Gelman's protocol of
+saying chains are converged when \(\widehat{R}<1.1\) then we would
+correctly classify all of these scenarios.
+
+The \(n_\mathrm{eff}\) results are interesting, but their usefulness is
+questionable. Scenarios 1 and 2 had effective sample sizes of 3000
+because they are sequences of independent draws. This is not related
+to convergence. In Scenario 3, two of the parameters had
+\(n_\mathrm{eff}\) larger than the actual number of samples. I suspect
+this is an anomaly due to the correlation between parameters. It
+certainly is does not provide meaningful information. Scenarios 4 and 5 have
+small \(n_\mathrm{eff}\) values because they contain little independent
+information. Running 3,000 simulations and getting an effective sample
+size of 13 is certainly a situation that warrants inspection, but
+a small \(n_\mathrm{eff}\) is not reason to label a chain
+as not converged.
+
+Results from the Heidelberger and Welch stationarity test are puzzling.
+It classified all scenarios as stationary except for Scenario 2. The
+three chains were appended end-to-end, so in Scenario 2 the test
+was done on a chain that jumped between three different distributions.
+I am surprised that that was classified as non-stationary when the
+wandering chains of Scenario 4 or the autocorrelated sequences of
+Scenario 5 were classified as stationary. I should also note that the
+halfwidth test is context-dependent. The test is passed if the
+ratio of the margin of error to the mean is below a user-specified
+threshold. In all of these scenarios the mean is near 0, so
+the halfwidth test is unreliable.
+
+The quantile equivalence tests for the probabilities 0.025 and 0.975
+gave the correct results in all cases except Scenario 5. Oddly, none
+of the medians were found to be converged. I have no explanation for this.
+The plots are useful tools for assessing strength of evidence. For example,
+the plots for Scenario 5 show that two chains are in close agreement, but
+the third has less variability than the other two. There may be a problem
+with that one chain, but they are probably near convergence.
+
+My preferred way to assess convergence would be to use a both multi-chain
+diagnostic on all chains and a single-chain diagnostic on each chain
+individually. QED and \(\widehat{R}\) are good choices for multi-chain
+diagnostics. QED has a meaning that directly relates to inference, and the
+plots are informative. \(\widehat{R}\) is reliable for symmetric
+distributions. I would not use Heidelberg and Welch until I study
+the theory behind it and I come to understand how and when to use it.
+Effective sample size should be checked to ensure it is not suspiciously
+small, but it is not worth reporting.
+
+\end{enumerate}
+
+%\pagebreak
+\afterpage{
+\begin{figure}[h!]\begin{center}
+<<qed,echo=FALSE,message=FALSE,warning=FALSE,out.height='1.4\\linewidth',fig.height=14>>=
+mat1 <- cbind(chains1[[1]], chains1[[2]], chains1[[3]])
+mat2 <- cbind(chains2[[1]], chains2[[2]], chains2[[3]])
+theta1 <- cbind(chains3[[1]][,1], chains3[[2]][,1], chains3[[3]][,1])
+theta2 <- cbind(chains3[[1]][,2], chains3[[2]][,2], chains3[[3]][,2])
+theta3 <- cbind(chains3[[1]][,3], chains3[[2]][,3], chains3[[3]][,3])
+mat4 <- cbind(chains4[[1]], chains1[[2]], chains1[[3]])
+mat5 <- cbind(chains5[[1]], chains1[[2]], chains1[[3]])
+
+myqeplot <- function(x, prob, epsilon = 0.01, alpha = 0.05, main, ...){
+  if(missing(prob)){stop("Must provide 'prob'")}
+  if(missing(main)){main <- 'Quantile Equivalence Plot'}
+  invisible(sapply(prob, function(p){
+    qeplot(x, prob = p, epsilon = epsilon, main = main, ...)
+    mtext(paste0('\np = ', round(p, 3),
+                 ifelse(qed(x, prob = p, epsilon = epsilon, alpha = alpha),
+                        ', Converged', ', Not Converged')), cex = 0.75)
+    }))
+}
+
+par(mfrow = c(7, 3), mar = c(4.1, 4.1, 4.1, 2.1))
+myqeplot(mat1, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = 'Quantile Equivalence Plot for Scenario 1')
+myqeplot(mat2, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = 'Quantile Equivalence Plot for Scenario 2')
+myqeplot(theta1, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = expression(bold('Quantile Equivalence Plot for'~theta[1])))
+myqeplot(theta2, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = expression(bold('Quantile Equivalence Plot for'~theta[2])))
+myqeplot(theta3, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = expression(bold('Quantile Equivalence Plot for'~theta[3])))
+myqeplot(mat4, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = 'Quantile Equivalence Plot for Scenario 4')
+myqeplot(mat5, prob = c(0.025, 0.5, 0.975), epsilon = 0.021,
+         main = 'Quantile Equivalence Plot for Scenario 5')
+@
+\caption{Quantile equivalence plots and tests using \(\epsilon=0.021\) and
+\(\alpha=0.05\).}
+\label{qeplots}
+\end{center}\end{figure}
+\thispagestyle{empty}
+\clearpage
+}
+
+\pagebreak
+\item %2
+
+\begin{enumerate}
+
+\item %a
+
+Using the identity \(\alpha=\frac{\nu}{2}\), \(\beta=\frac{\nu}{2}s^2\),
+\(\text{inverse-Gamma}(0.001,0.001)\) is equivalent to\\
+\(\text{scaled-inverse-}\chi^2(0.0005,5\times10^{-10})\).
+
+\item %b
+
+I plotted all of the distributions in Figure \ref{manypriors}. For Prior
+D, I chose 1 degree of freedom to make the distribution rather wide.
+
+\begin{figure}[h!]
+<<prob2priors1,echo=FALSE,cache=TRUE,out.height='1.1\\linewidth',fig.height=11>>=
+par(mfrow = c(4, 2), mar = c(4.1, 4.1, 4.1, 1.1))
+curve(densigamma(x, 0.001, 0.001), from = 0.01, to = 1, yaxt = 'n',
+      main = 'Prior A', ylab = '', xlab = expression(sigma[theta]^2))
+axis(2, at = 0)
+curve(dunif(x, -100, 100), from = -100, to = 100, yaxt = 'n',
+      ylim = c(0, 0.012), main = 'Prior B', ylab = '',
+      xlab = expression(log(sigma[theta])))
+curve(dunif(x, -100, 100), from = -101, to = -100.1, add = TRUE)
+curve(dunif(x, -100, 100), from = 100.1, to = 101, add = TRUE)
+axis(2, at = 0)
+curve(dunif(x, 0, 100), from = 0, to = 100, yaxt = 'n',
+      ylim = c(0, 0.016), main = 'Prior C', ylab = '',
+      xlab = expression(sigma[theta]))
+curve(dunif(x, 0, 100), from = -0.5, to = -0.1, add = TRUE)
+curve(dunif(x, 0, 100), from = 100.1, to = 100.5, add = TRUE)
+axis(2, at = 0)
+curve(2*dt(x, 1), from = 0, to = 10, yaxt = 'n',
+      main = 'Prior D, df = 1', ylab = '', xlab = expression(sigma[theta]))
+axis(2, at = 0)
+curve(1/x, from = 0, to = 10, yaxt = 'n',
+      main = 'Prior E', ylab = '', xlab = expression(sigma[theta]^2))
+axis(2, at = 0)
+curve(dunif(x, 0, 1000000), from = 0, to = 999999, yaxt = 'n',
+      ylim = c(0, 0.00002), main = 'Prior F', ylab = '',
+      xlab = expression(sigma[theta]))
+curve(dunif(x, 0, 1000000), from = -5000, to = -1, add = TRUE)
+axis(2, at = 0)
+sig.t <- seq(0.1, 10, 0.1)
+sig.y <- seq(0.1, 100, 0.1)
+sig.ty <- expand.grid('x' = sig.y, 'y' = sig.t)
+z <- matrix(
+    apply(sig.ty, 1, function(s){return((7/s[1])*(1+(s[2]/s[1]))^(-8))}),
+    ncol = length(sig.t)
+  )
+contour(x = sig.y, y = sig.t, z = z, nlevels = 50, drawlabels = FALSE,
+      ylim = c(0, 10), xlim = c(0, 100),
+      main = expression('Prior G, a=7, Conditional on'~sigma[y]^2),
+      ylab = expression(sigma[theta]^2), xlab = expression(sigma[y]^2))
+@
+\caption{Seven possible prior distributions for hierarchical scale parameters.}
+\label{manypriors}
+\end{figure}
+
+\pagebreak
+\item %c
+
+With a simple Jacobian calculation, I found that Prior B becomes
+\(p(\sigma_\theta)=\frac{1}{200\sigma_\theta}\) for
+\(e^{-100}<\sigma_\theta<e^{100}\). The density blows up near the lower
+bound and is very flat everywhere else. Since
+\(e^{100}\approx 2.7\times 10^{43}\), Prior B allows for occasional
+mind-bogglingly large values. Any graphical presentation of this will make
+Prior C appear invisible, so Figure \ref{trans1} shows 100 draws from
+Prior B displayed alone and compares the density functions on a scale
+more appropriate for Prior C.
+
+\begin{figure}[h!]
+<<trans1,echo=FALSE>>=
+par(mfrow = c(1, 2), mar = c(4.1, 2.1, 4.1, 2.2))
+set.seed(8723)
+bigdraws <- exp(runif(100, -100, 100))
+hist(bigdraws, freq = FALSE, yaxt = 'n',
+     xlab = expression(sigma[theta]), ylab = '', xlim = c(0, 8e41),
+     main = '100 Exponentiated Draws from Prior B', breaks = 100)
+curve(1/(200*x), from = 0.1, to = 150, n = 1000, xlim = c(0, 150), yaxt = 'n',
+      lty = 1, lwd = 1, xlab = expression(sigma[theta]), ylab = '',
+      main = 'Priors B and C')
+curve(dunif(x, 0, 100), lty = 2, lwd = 2, n = 1000, add = TRUE)
+axis(2, at = 0)
+legend('topright', lty = c(1, 2), lwd = c(1, 2),
+       legend = c('Prior B', 'Prior C'))
+@
+\caption{Left: 100 draws from Prior B. Right: Priors B and C on the
+scale of Prior C.}
+\label{trans1}
+\end{figure}
+
+\item %d
+
+Prior C becomes
+\(p\left(\sigma^2_\theta\right)=\frac{1}{200\sqrt{\sigma^2_\theta}}\)
+for \(0<\sigma^2_\theta<\) 10,000. Figure \ref{trans2} shows that this is
+well-constrained compared to Prior A. The philosophy of modeling a complete
+lack of a priori knowledge should allow the variance to be entirely unbounded,
+but when prior draws on the order of \(10^{306}\) occur, I think the analyst
+needs to justify the decision \emph{not} to use a weakly informative prior.
+
+\begin{figure}[h!]
+<<trans2,echo=FALSE>>=
+par(mfrow = c(1, 2), mar = c(4.1, 2.1, 4.1, 2.2))
+set.seed(5636)
+bigdraws2 <- rigamma(100, 0.001, 0.001)
+hist(bigdraws2, freq = FALSE, yaxt = 'n', xlim = c(0, 1.2e306),
+     xlab = expression(sigma[theta]^2), ylab = '',
+     main = '100 Draws from Prior A', breaks = 100)
+curve(densigamma(x, 0.001, 0.001), from = 1, to = 12000, yaxt = 'n',
+      n = 1000, lty = 1, lwd = 1,
+      main = 'Priors A and C', ylab = '', xlab = expression(sigma[theta]^2))
+curve((x<10000)/(200*sqrt(x)), n = 1000, lty = 2, lwd = 2, add = TRUE)
+axis(2, at = 0)
+legend('topright', lty = c(1, 2), lwd = c(1, 2),
+       legend = c('Prior A', 'Prior C'))
+@
+\caption{Left: 100 draws from Prior A. Right: Priors A and C on the
+scale of Prior A.}
+\label{trans2}
+\end{figure}
+
+\item %e
+
+The \(t\) distribution with 1 degree of freedom is the same as the Cauchy
+distribution, so prior D is a half-Cauchy distribution if df = 1.
+
+\end{enumerate}
+
+\item %3
+
+\begin{enumerate}
+
+\item %a
+
+\begin{enumerate}
+
+\item It seemed easiest to make use of base R functions. For \(\sigma>0\),
+the folded-noncentral-\(t\) density is simply the sum of the
+noncentral-\(t\) densities at \(\pm\sigma\). This is
+illustrated in Figure \ref{dft}.
+
+Since R does not include a scaled-\(t\) distribution, I modified the
+central \(t\) distribution into a location-scale distribution.
+
+<<dft>>=
+# n       number of draws
+# df      degrees of freedom
+# scale   scale parameter
+# center  normal center
+dft <- function(t, df, center = 0, scale = 1){
+  return(ifelse(t > 0,
+                (dt((t-center)/scale, df = df) + dt((-t-center)/scale, df = df)) / scale,
+                0)
+         )
+}
+@
+
+\begin{figure}[h!]
+<<dtf2,echo=FALSE>>=
+options(scipen = 5)
+par(mar = c(4.1, 4.1, 4.1, 2.1))
+curve(dft(x, df = 7, scale = 3, center = 4), from = 0.1, to = 20, n = 200,
+      xlab = expression(sigma[alpha]), ylab = '', yaxt = 'n',
+      main = 'Folded-Noncentral-t Distribution',
+      lty = 1, lwd = 2, xlim = c(-10, 20))
+curve(dft(x, df = 7, scale = 3, center = 4), from = -10, to = 0,
+      n = 100, lty = 1, lwd = 2, add = TRUE)
+curve(dt((x-4)/3, df = 7) / 3, lty = 3, lwd = 4, add = TRUE)
+curve(dt((x-4)/3, df = 7) / 3, from = 0, lty = 1, lwd = 1, add = TRUE)
+curve(dt((-x-4)/3, df = 7) / 3, from = 0, lty = 1, lwd = 1, add = TRUE)
+legend('topright', lty = c(3, 1, 1), lwd = c(4, 1, 2),
+       legend = c(expression(t[7](list(4,3))~density),
+                  expression(t[7](list(4,3))~density~folded~at~0),
+                  expression('folded-noncentral-t'[7](list(4,3))~density)))
+@
+\caption{Illustration of the construction of the
+folded-noncentral-\(t\) distribution.}
+\label{dft}
+\end{figure}
+
+\item Gelman comments that we can set the Normal scale at 1 and specify
+the scale of the square-root-inverse-\(\chi^2\). I prefer to rescale the
+Normal component and use R's built in functions without having to think
+about the inverse-scale parameter of a square-root-\(\chi^2\) distribution,
+although fixing both scales at 1 and multiplying by the draw by the chosen
+scale for the \(t\) distribution would achieve the same result.
+
+<<rft>>=
+# n       number of draws
+# df      degrees of freedom
+# scale   scale parameter
+# center  normal center
+rft <- function(n, df, scale = 1, center = 0){
+  return(abs(rnorm(n, mean = center, sd = scale)) * sqrt(df / rchisq(n, df = df)))
+}
+@
+
+\begin{figure}[h!]\begin{center}
+<<rft2,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,out.height='0.3\\linewidth',fig.height=3>>=
+set.seed(3289)
+ftdraws <- rft(10000, df = 7, center = 6, scale = 10)
+par(mar = c(4.1, 4.1, 3.1, 2.1))
+hist(ftdraws, freq = FALSE, breaks = 100, xlab = expression(sigma[alpha]),
+     ylab = '', yaxt = 'n',
+     main = '10,000 Folded-noncentral-t Draws', xlim = c(0, 60))
+curve(dft(x, df = 7, center = 6, scale = 10), from = 0.01, add = TRUE)
+@
+\caption{Histogram of 10,000 draws from a
+\(\text{folded-noncentral-}t_{7}(6,10)\) distribution, with the density
+curve overlaid.}
+\label{rft}
+\end{center}\end{figure}
+
+\end{enumerate}
+
+\item %b
+
+The basic hierarchical model is
+\begin{align*}
+y_{ij}&=\mathrm{N}(\mu+\alpha_{j},\sigma^2_y);\\
+\alpha_{j}&=\mathrm{N}(0,\sigma^2_\alpha)
+\end{align*}
+for groups \(j=1,\dots,J\) and individuals \(i=1,\dots,n_j\) in group \(j\).
+
+\item %c
+
+The following code generated the data, which appear in Figure \ref{fakeplot1}.
+
+<<gsim,cache=TRUE>>=
+set.seed(8725)
+n <- c(5, 10, 30, 30, 20, 25, 50, 10)
+J <- length(n)
+sigsq.y <- 4
+mu <- 20
+sigsq.a <- 2
+
+# Generate alphas and a list of y vectors
+alpha <- rnorm(J, 0, sqrt(sigsq.a))
+y <- lapply(1:J, function(j){rnorm(n[j], mu+alpha[j], sqrt(sigsq.y))})
+@
+
+\begin{figure}[h!]\begin{center}
+<<fakeplot,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,out.height='0.3\\linewidth',fig.height=3,cache=TRUE,dependson='gsim'>>=
+names(y)<-paste0('y_', 1:J)
+stan.data <- c(list('J' = J, 'n' = n), y)
+par(mar = c(4.1, 4.1, 3.1, 4.1))
+boxplot(y, horizontal = TRUE, ylim = c(14, 26), yaxt = 'n',
+        main = 'First Set of Simulated Data', xlab = 'y', ylab = 'Group')
+axis(2, at = 1:J, las = 2)
+axis(4, at = 1:J, labels = n, las = 2)
+mtext('Group Size', 4, line = 2)
+@
+\caption{Fake data from the hierarchical model with \(\mu=20\),
+\(\sigma^2_y=4\), and \(\sigma^2_\alpha=2\).}
+\label{fakeplot1}
+\end{center}\end{figure}
+
+\item %d
+
+We could use \(p(\mu,\sigma_y)\propto\frac{1}{\sigma_y}\) for a weakly
+informative prior. I tend to prefer it over the uniform prior on
+\(\mu,\sigma_y\) because I like to constrain \(\sigma_y\) to be small.
+
+After reading Gelman's paper, I would first consider a half-Cauchy prior
+for \(\sigma_\alpha\). Gelman suggests that a uniform prior will work
+when there are 8 groups, but a half-Cauchy with large scale is also
+quite flat.
+
+\item %e
+
+My fake data has a range of a little less than 12 which suggests an overall
+standard deviation for \(y\) (ignoring groups) of at most 6. The value of
+\(\sigma_\alpha\) is certainly smaller than this. To be conservative,
+I set \(A=10\).
+
+Keeping problem 2 in mind, I did not want to set \(\epsilon\) too small.
+I chose \(\epsilon=0.5\), which allows large values but has most of its mass
+below \(\sigma^2_\alpha=100\).
+
+\begin{figure}[b!]\begin{center}
+<<stangamma1,echo=FALSE,out.width='0.6\\linewidth',fig.width=6>>=
+set.seed(399)
+gdraws1 <- rigamma(1000, 0.5, 0.5)
+par(mar = c(4.1, 4.1, 3.1, 2.1))
+hist(gdraws1[gdraws1 < 50], breaks = 100, freq = FALSE,
+     xlim = c(0, 50), ylim = c(0, 0.55),
+     main = '1,000 Prior Draws From Inv-Gamma(0.5, 0.5)',
+     xlab = expression(sigma[alpha]^2), ylab = '', yaxt = 'n')
+curve(densigamma(x, 0.5, 0.5), from = 0.1, n = 1000, add = TRUE)
+@
+\caption{Inverse-Gamma prior with \(\epsilon=0.5\). 104 draws exceeded 50 and
+do not appear on this plot. 79 draws exceeded 100. The maximum was
+2,112,847.3.}
+\label{stangamma1}
+\end{center}\end{figure}
+
+I fit the model in Stan. For each prior, I ran four chains for 1,000
+iterations of warmup and then simulated 2,500 samples from each chain.
+Stan selected random initial values.
+
+The posterior distributions and some quantiles of \(\sigma_\alpha\) and
+\(\mu\) are compared in Figure \ref{stancomp1} on page \pageref{stancomp1}.
+The \(\sigma^2_\alpha\sim\text{Inv-Gamma}(0.5, 0.5)\) prior was less spread
+out than the other priors and resulted in the posterior distribution of
+\(\sigma_\alpha\) having a shorter right tail compared to the other
+posteriors. The posterior distributions from the uniform priors are
+practically identical.
+
+For \(\mu\), the medians and quartiles for are nearly identical. The 95\%
+posterior interval from the inverse-Gamma prior is slightly narrower than
+the others, but the posterior inferences are essentially the same in all
+three cases.
+
+<<stan1,echo=FALSE,cache=TRUE>>=
+stan1.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan2,echo=FALSE,cache=TRUE,dependson='stan1'>>=
+stan1.model <- stan_model(model_code = stan1.code, model_name = 'stan1')
+@
+<<stan3,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot','stan2')>>=
+stan1.samp <- sampling(stan1.model, data = stan.data,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 2562)
+@
+
+%\begin{figure}[h!]
+%\begin{minipage}{0.4\textwidth}
+%<<stan4,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan3',fig.width=4,fig.height=4,out.height='0.9\\textwidth'>>=
+%stan_plot(stan1.samp, pars = 'alpha', ci_level = 0.5, outer_level = 0.95)
+%@
+%\end{minipage}\begin{minipage}{0.6\textwidth}
+%<<stan5,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan3',fig.width=6,fig.height=4,out.height='0.6\\textwidth'>>=
+%grid.arrange(stan_hist(stan1.samp, pars = 'mu') + xlim(18, 22),
+%             stan_hist(stan1.samp, pars = 'sigma_y') + xlim(1.6, 2.2),
+%             stan_hist(stan1.samp, pars = 'sigma_alpha') + xlim(0, 3),
+%             ncol = 1)
+%@
+%\end{minipage}
+%\caption{Stan results from the \(\mathrm{Uniform}(0,\infty)\)
+%prior on \(\sigma_\alpha\).}
+%\label{unif1}
+%\end{figure}
+
+<<stan6,echo=FALSE,cache=TRUE>>=
+stan2.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigsq_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  real<lower=0> sigma_alpha;
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+  sigma_alpha <- pow(sigsq_alpha, 0.5);
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  sigsq_alpha ~ inv_gamma(0.5, 0.5);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan7,echo=FALSE,cache=TRUE,dependson='stan6'>>=
+stan2.model <- stan_model(model_code = stan2.code, model_name = 'stan2')
+@
+<<stan8,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot','stan7')>>=
+stan2.samp <- sampling(stan2.model, data = stan.data,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 8937)
+@
+
+%\begin{figure}[h!]
+%\begin{minipage}{0.4\textwidth}
+%<<stan9,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan8',fig.width=4,fig.height=4,out.height='0.9\\textwidth'>>=
+%stan_plot(stan2.samp, pars = 'alpha', ci_level = 0.5, outer_level = 0.95)
+%@
+%\end{minipage}\begin{minipage}{0.6\textwidth}
+%<<stan10,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan8',fig.width=6,fig.height=4,out.height='0.6\\textwidth'>>=
+%grid.arrange(stan_hist(stan2.samp, pars = 'mu') + xlim(18, 22),
+%             stan_hist(stan2.samp, pars = 'sigma_y') + xlim(1.6, 2.2),
+%             stan_hist(stan2.samp, pars = 'sigma_alpha') + xlim(0, 3),
+%             ncol = 1)
+%@
+%\end{minipage}
+%\caption{Stan results from the \(\text{Inv-Gamma}(0.5,0.5)\)
+%prior on \(\sigma^2_\alpha\).}
+%\label{gamma1}
+%\end{figure}
+
+<<stan11,echo=FALSE,cache=TRUE>>=
+stan3.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  sigma_alpha ~ uniform(0, 10);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan12,echo=FALSE,cache=TRUE,dependson='stan11'>>=
+stan3.model <- stan_model(model_code = stan3.code, model_name = 'stan3')
+@
+<<stan13,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot','stan12')>>=
+stan3.samp <- sampling(stan3.model, data = stan.data,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 3627)
+@
+
+%\begin{figure}[h!]
+%\begin{minipage}{0.4\textwidth}
+%<<stan14,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan13',fig.width=4,fig.height=4,out.height='0.9\\textwidth'>>=
+%stan_plot(stan3.samp, pars = 'alpha', ci_level = 0.5, outer_level = 0.95)
+%@
+%\end{minipage}\begin{minipage}{0.6\textwidth}
+%<<stan15,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson='stan13',fig.width=6,fig.height=4,out.height='0.6\\textwidth'>>=
+%#stan_hist(stan3.samp, pars = c('mu', 'sigma_y', 'sigma_alpha'), ncol = 1)
+%grid.arrange(stan_hist(stan3.samp, pars = 'mu') + xlim(18, 22),
+%             stan_hist(stan3.samp, pars = 'sigma_y') + xlim(1.6, 2.2),
+%             stan_hist(stan3.samp, pars = 'sigma_alpha') + xlim(0, 3),
+%             ncol = 1)
+%@
+%\end{minipage}
+%\caption{Stan results from the \(\mathrm{Uniform}(0,10)\)
+%prior on \(\sigma_\alpha\).}
+%\label{unifa1}
+%\end{figure}
+
+\begin{figure}[h!]\begin{center}
+<<stancomp1,echo=FALSE,cache=TRUE,dependson=c('stan3','stan8','stan13'),out.height='0.9\\linewidth',fig.height=9>>=
+sig.stan1 <- extract(stan1.samp, 'sigma_alpha')$sigma_alpha
+sig.stan2 <- extract(stan2.samp, 'sigma_alpha')$sigma_alpha
+sig.stan3 <- extract(stan3.samp, 'sigma_alpha')$sigma_alpha
+mu.stan1 <- extract(stan1.samp, 'mu')$mu
+mu.stan2 <- extract(stan2.samp, 'mu')$mu
+mu.stan3 <- extract(stan3.samp, 'mu')$mu
+
+par(mfcol = c(3, 2), mar = c(3.1, 2.1, 3.1, 2.1))
+
+sig.quants1 <- quantile(sig.stan1, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan1, freq = FALSE, breaks = 75, xlim = c(0.5, 5.5),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Improper Uniform Prior')),
+     xlab = expression(sigma[alpha]), ylab = '', ylim = c(0, 1.1), yaxt = 'n')
+segments(x0 = sig.quants1, y0 = 0, y1 = 1.025, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants1, y = 1.075, labels = round(sig.quants1, 2), srt = 45)
+
+sig.quants2 <- quantile(sig.stan2, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan2, freq = FALSE, breaks = 50, xlim = c(0.5, 5.5),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Inverse-Gamma Prior')),
+     xlab = expression(sigma[alpha]), ylab = '', ylim = c(0, 1.45), yaxt = 'n')
+segments(x0 = sig.quants2, y0 = 0, y1 = 1.35, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants2, y = 1.42, labels = round(sig.quants2, 2),
+     srt = 45, cex = 0.9)
+
+sig.quants3 <- quantile(sig.stan3, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan3, freq = FALSE, breaks = 100, xlim = c(0.5, 5.5),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Proper Uniform Prior')),
+     xlab = expression(sigma[alpha]), ylab = '', ylim = c(0, 1.1), yaxt = 'n')
+segments(x0 = sig.quants3, y0 = 0, y1 = 1.025, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants3, y = 1.075, labels = round(sig.quants3, 2), srt = 45)
+
+mu.quants1 <- quantile(mu.stan1, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan1, freq = FALSE, breaks = 75, xlim = c(17.5, 22.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Improper Uniform Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 1.05), yaxt = 'n')
+segments(x0 = mu.quants1, y0 = 0, y1 = 0.95, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants1, y = 1, labels = round(mu.quants1, 2), srt = 45)
+
+mu.quants2 <- quantile(mu.stan2, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan2, freq = FALSE, breaks = 50, xlim = c(17.5, 22.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Inverse-Gamma Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 1.05), yaxt = 'n')
+segments(x0 = mu.quants2, y0 = 0, y1 = 0.95, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants2, y = 1, labels = round(mu.quants2, 2), srt = 45)
+
+mu.quants3 <- quantile(mu.stan3, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan3, freq = FALSE, breaks = 100, xlim = c(17.5, 22.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Proper Uniform Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 1.05), yaxt = 'n')
+segments(x0 = mu.quants3, y0 = 0, y1 = 0.95, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants3, y = 1, labels = round(mu.quants3, 2), srt = 45)
+@
+\caption{Comparison of the posterior distributions of \(\sigma_\alpha\) and
+\(\mu\) from three different priors, for the data with large
+between-group variation. Vertical lines mark the 0.025, 0.25,
+0.5, 0.75, and 0.975 quantiles.
+Top: \(\sigma_\alpha\sim\mathrm{Unif}(0,\infty)\) prior.
+Center: \(\sigma^2_\alpha\sim\text{Inv-Gamma}(0.5,0.5)\) prior.
+Bottom: \(\sigma_\alpha\sim\mathrm{Unif}(0,10)\) prior.}
+\label{stancomp1}
+\end{center}\end{figure}
+
+\begin{figure}[p!]
+<<expprior,echo=FALSE>>=
+par(mfrow = c(1, 2), mar = c(4.1, 2.1, 4.1, 2.1))
+curve(2*dnorm(x, 0, 4), from = 0, to = 12, ylim = c(0, 0.22), yaxt = 'n',
+      main = 'Folded-Normal(0, 16) Distribution',
+      xlab = expression(sigma[alpha]))
+axis(2, at = 0)
+curve(dft(x, 1, 0, 3), from = 0.1, to = 12, ylim = c(0, 0.22), yaxt = 'n',
+      main = 'Half-Cauchy(0, 9) Distribution',
+      xlab = expression(sigma[alpha]))
+axis(2, at = 0)
+@
+\caption{Priors for the redundant-parameter model.}
+\label{expprior}
+\end{figure}
+
+<<stan17,echo=FALSE,cache=TRUE>>=
+stan4.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real xi;
+  real eta[J];
+}
+
+transformed parameters{
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+  real theta[J];
+  sigma_alpha <- fabs(xi);
+  for (j in 1:J){
+    alpha[j] <- xi * eta[j];
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  xi ~ normal(0, 4);
+  eta ~ normal(0, 1);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan18,echo=FALSE,cache=TRUE,dependson='stan17'>>=
+stan4.model <- stan_model(model_code = stan4.code, model_name = 'stan4')
+@
+<<stan19,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot','stan18')>>=
+stan4.samp <- sampling(stan4.model, data = stan.data,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 2628)
+@
+
+<<stan20,echo=FALSE,cache=TRUE>>=
+stan5.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real xi;
+  real eta[J];
+  real<lower=0> sigsq_eta;
+}
+
+transformed parameters{
+  real<lower=0> sigma_alpha;
+  real<lower=0> sigma_eta;
+  real alpha[J];
+  real theta[J];
+  sigma_eta <- pow(sigsq_eta, 0.5);
+  sigma_alpha <- fabs(xi) * sigma_eta;
+  for (j in 1:J){
+    alpha[j] <- xi * eta[j];
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  xi ~ normal(0, 3);
+  eta ~ normal(0, sigma_eta);
+  sigsq_eta ~ inv_chi_square(1);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan21,echo=FALSE,cache=TRUE,dependson='stan20'>>=
+stan5.model <- stan_model(model_code = stan5.code, model_name = 'stan5')
+@
+<<stan22,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot','stan21')>>=
+stan5.samp <- sampling(stan5.model, data = stan.data,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 5364)
+@
+
+\begin{figure}[p!]
+<<stancomp2,echo=FALSE,cache=TRUE,dependson=c('stan19','stan22'),out.height='0.6\\linewidth',fig.height=6>>=
+sig.stan4 <- extract(stan4.samp, 'sigma_alpha')$sigma_alpha
+sig.stan5 <- extract(stan5.samp, 'sigma_alpha')$sigma_alpha
+
+par(mfcol = c(2, 2), mar = c(3.1, 2.1, 4.1, 2.1))
+sig.quants4 <- quantile(sig.stan4, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan4, freq = FALSE, breaks = 50, xlim = c(0.5, 5.5),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Folded Normal Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 1.15), yaxt = 'n')
+segments(x0 = sig.quants4, y0 = 0, y1 = 1.075, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants4, y = 1.125, labels = round(sig.quants4, 2),
+     srt = 45, cex = 0.9)
+
+sig.quants5 <- quantile(sig.stan5, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan5, freq = FALSE, breaks = 30, xlim = c(0.5, 5.5),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Half-Cauchy Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 1.25), yaxt = 'n')
+segments(x0 = sig.quants5, y0 = 0, y1 = 1.15, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants5, y = 1.2, labels = round(sig.quants5, 2),
+     srt = 45, cex = 0.9)
+
+mu.stan4 <- extract(stan4.samp, 'mu')$mu
+mu.stan5 <- extract(stan5.samp, 'mu')$mu
+
+mu.quants4 <- quantile(mu.stan4, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan4, freq = FALSE, breaks = 75, xlim = c(17.5, 22.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Folded Normal Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 1.05), yaxt = 'n')
+segments(x0 = mu.quants4, y0 = 0, y1 = 0.95, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants4, y = 1, labels = round(mu.quants4, 2), srt = 45)
+
+mu.quants5 <- quantile(mu.stan5, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan5, freq = FALSE, breaks = 50, xlim = c(17.5, 22.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Half-Cauchy Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 1.05), yaxt = 'n')
+segments(x0 = mu.quants5, y0 = 0, y1 = 0.95, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants5, y = 1, labels = round(mu.quants5, 2), srt = 45)
+@
+\caption{Comparison of posterior distributions of \(\sigma_\alpha\) and
+\(\mu\) from the redundant parameter model with two different priors,
+for the data with large between-group variation.
+Vertical lines mark the 0.025, 0.25, 0.5, 0.75, and 0.975 quantiles.
+Top: Folded Normal, scale 4.
+Bottom: Half-Cauchy, scale 3.}
+\label{stancomp2}
+\end{figure}
+
+\pagebreak
+\item %f
+
+The model with redundant parameters is
+\begin{align*}
+y_{ij}&=\mathrm{N}(\mu+\xi\eta_{j},\sigma^2_y);\\
+\eta_{j}&=\mathrm{N}(0,\sigma^2_\eta)
+\end{align*}
+where \(\alpha_{j}=\xi\eta_{j}\) and \(\sigma_\alpha=|\xi|\sigma_\eta\).
+The folded Normal prior on \(\sigma_\alpha\) is equivalent to
+\(\xi\sim\mathrm{N}(0, \sigma^2_0)\), \(\sigma_\eta=1\) constant. The
+half-Cauchy prior of \(\sigma_\alpha\) is
+\(\xi\sim\mathrm{N}(0,\sigma^2_0)\),
+\(\sigma_\eta\sim\text{Inv-}\chi^2_1\). Again,
+I intended to use weakly informative priors to keep the posterior
+distributions constrained. I chose a scale of \(\sigma_0=4\) for the
+folded Normal and a scale of \(\sigma_0=3\) for the half-Cauchy because
+these have most of their mass below 6 but do not entirely rule out
+large values. For \(\mu\) and \(\sigma_y\), I used
+\(p(\mu,\sigma_y)\propto\frac{1}{\sigma_y}\).
+
+I fit this model in Stan, again running four chains for a 1,000 iteration
+warmup period and then for another 2,500 simulations. Stan selected
+random initial values.
+
+The posterior distributions for the redundant parameter model appear in
+Figure \ref{stancomp2}. Both priors resulted in posterior distributions
+for \(\mu\) that match the posteriors from (c).
+
+The posterior distributions of \(\sigma_\alpha\) have slightly shorter
+right tails compared to the results form the Uniform priors. However,
+these posteriors were less tightly constrained than the posterior from the
+inverse-Gamma prior. These results are what I expected; the Uniform
+priors allow large values to happen often. The folded-Normal and
+half-Cauchy distributions restrain the \(\sigma_\alpha\) values without
+concentrating a large mass at zero like the inverse-Gamma does.
+
+\end{enumerate}
+
+\item %4
+
+\begin{enumerate}
+
+\item %a
+
+I changed \(\sigma^2_\alpha\) to 0.01 and re-ran the same code that
+generated the original data. The new data appear in Figure \ref{fakeplot2}.
+Ignoring an outlier in group 2, these data have a range of about 9, so
+there is almost as much overall variation as there was in the first set
+of simulated data. There is noticeably less variation in where the groups
+are centered. Since my previous priors were more dispersed than necessary,
+and I want to continue to be very weakly informative, I used the same priors
+as before.
+
+Once again, the models were fit in Stan with four chains, 1,000
+warmup simulations, 2,500 simulations sampled, and Stan-selected random
+initial values. The posterior distributions from the basic hierarchical
+model appear in Figure \ref{stancomp3} and the posteriors from the
+expanded model are shown in Figure \ref{stancomp4}.
+
+<<gsim2,echo=FALSE,cache=TRUE>>=
+set.seed(8725)
+n <- c(5, 10, 30, 30, 20, 25, 50, 10)
+J <- length(n)
+sigsq.y <- 4
+mu <- 20
+sigsq.a <- 0.01
+
+# Generate alphas and a list of y vectors
+alpha <- rnorm(J, 0, sqrt(sigsq.a))
+y2 <- lapply(1:J, function(j){rnorm(n[j], mu+alpha[j], sqrt(sigsq.y))})
+@
+
+\begin{figure}[b!]\begin{center}
+<<fakeplot2,echo=FALSE,out.width='0.6\\linewidth',fig.width=6,out.height='0.3\\linewidth',fig.height=3,cache=TRUE,dependson='gsim2'>>=
+names(y2)<-paste0('y_', 1:J)
+stan.data2 <- c(list('J' = J, 'n' = n), y2)
+par(mar = c(4.1, 4.1, 3.1, 4.1))
+boxplot(y2, horizontal = TRUE, ylim = c(14, 26), yaxt = 'n',
+        main = 'Second Set of Simulated Data', xlab = 'y', ylab = 'Group')
+axis(2, at = 1:J, las = 2)
+axis(4, at = 1:J, labels = n, las = 2)
+mtext('Group Size', 4, line = 2)
+@
+\caption{Fake data with \(\mu=20\), \(\sigma^2_y=4\), and
+\(\sigma^2_\alpha=0.01\).}
+\label{fakeplot2}
+\end{center}\end{figure}
+
+<<stan23,echo=FALSE,cache=TRUE>>=
+stan6.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan24,echo=FALSE,cache=TRUE,dependson='stan23'>>=
+stan6.model <- stan_model(model_code = stan6.code, model_name = 'stan6')
+@
+<<stan25,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot2','stan24')>>=
+stan6.samp <- sampling(stan6.model, data = stan.data2,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 2562)
+@
+
+<<stan26,echo=FALSE,cache=TRUE>>=
+stan7.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigsq_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  real<lower=0> sigma_alpha;
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+  sigma_alpha <- pow(sigsq_alpha, 0.5);
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  sigsq_alpha ~ inv_gamma(0.5, 0.5);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan27,echo=FALSE,cache=TRUE,dependson='stan26'>>=
+stan7.model <- stan_model(model_code = stan7.code, model_name = 'stan7')
+@
+<<stan28,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot2','stan27')>>=
+stan7.samp <- sampling(stan7.model, data = stan.data2,
+                         chains = 4, iter = 3500, warmup = 2000,
+                         init = 'random', seed = 8937)
+@
+
+<<stan29,echo=FALSE,cache=TRUE>>=
+stan8.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+}
+
+transformed parameters{
+  real theta[J];
+  for (j in 1:J){
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  alpha ~ normal(0, sigma_alpha);
+  sigma_alpha ~ uniform(0, 10);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan30,echo=FALSE,cache=TRUE,dependson='stan29'>>=
+stan8.model <- stan_model(model_code = stan8.code, model_name = 'stan8')
+@
+<<stan31,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot2','stan30')>>=
+stan8.samp <- sampling(stan8.model, data = stan.data2,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 3627)
+@
+
+\begin{figure}[b!]
+<<stancomp3,echo=FALSE,cache=TRUE,dependson=c('stan25','stan28','stan30'),out.height='0.9\\linewidth',fig.height=9>>=
+sig.stan6 <- extract(stan6.samp, 'sigma_alpha')$sigma_alpha
+sig.stan7 <- extract(stan7.samp, 'sigma_alpha')$sigma_alpha
+sig.stan8 <- extract(stan8.samp, 'sigma_alpha')$sigma_alpha
+
+par(mfcol = c(3, 2), mar = c(3.1, 2.1, 3.1, 2.1))
+sig.quants6 <- quantile(sig.stan6, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan6, freq = FALSE, breaks = 50, xlim = c(0, 2),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Improper Uniform Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 3.3), yaxt = 'n')
+segments(x0 = sig.quants6, y0 = 0, y1 = 3.2, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants6, y = 3.25, labels = round(sig.quants6, 2),
+     srt = 45, cex = 0.9)
+
+sig.quants7 <- quantile(sig.stan7, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan7, freq = FALSE, breaks = 50, xlim = c(0, 2),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Inverse-Gamma Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 3.1), yaxt = 'n')
+segments(x0 = sig.quants7, y0 = 0, y1 = 3.025, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants7, y = 2.975, labels = round(sig.quants7, 2),
+     srt = 45, cex = 0.9)
+
+sig.quants8 <- quantile(sig.stan8, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan8, freq = FALSE, breaks = 50, xlim = c(0, 2),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Proper Uniform Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 4.4), yaxt = 'n')
+segments(x0 = sig.quants8, y0 = 0, y1 = 4.3, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants8, y = 4.35, labels = round(sig.quants8, 2),
+     srt = 45, cex = 0.9)
+
+mu.stan6 <- extract(stan6.samp, 'mu')$mu
+mu.stan7 <- extract(stan7.samp, 'mu')$mu
+mu.stan8 <- extract(stan8.samp, 'mu')$mu
+
+mu.quants6 <- quantile(mu.stan6, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan6, freq = FALSE, breaks = 50, xlim = c(18.5, 21.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Improper Uniform Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 2.8), yaxt = 'n')
+segments(x0 = mu.quants6, y0 = 0, y1 = 2.675, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants6, y = 2.725, labels = round(mu.quants6, 2), srt = 45)
+
+mu.quants7 <- quantile(mu.stan7, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan7, freq = FALSE, breaks = 50, xlim = c(18.5, 21.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Inverse-Gamma Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 2), yaxt = 'n')
+segments(x0 = mu.quants7, y0 = 0, y1 = 1.875, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants7, y = 1.925, labels = round(mu.quants7, 2), srt = 45)
+
+mu.quants8 <- quantile(mu.stan8, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan8, freq = FALSE, breaks = 75, xlim = c(18.5, 21.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Proper Uniform Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 2.8), yaxt = 'n')
+segments(x0 = mu.quants8, y0 = 0, y1 = 2.675, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants8, y = 2.725, labels = round(mu.quants8, 2), srt = 45)
+@
+\caption{Comparison of posterior distributions of \(\sigma_\alpha\) and
+\(\mu\) from three different priors, for the data with small
+between-group variation. Vertical lines mark the 0.025, 0.25,
+0.5, 0.75, and 0.975 quantiles.
+Top: \(\sigma_\alpha\sim\mathrm{Unif}(0,\infty)\).
+Center: \(\sigma^2_\alpha\sim\text{Inv-Gamma}(0.5,0.5)\).
+Bottom: \(\sigma_\alpha\sim\mathrm{Unif}(0,10)\).}
+\label{stancomp3}
+\end{figure}
+
+<<stan32,echo=FALSE,cache=TRUE>>=
+stan9.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real xi;
+  real eta[J];
+}
+
+transformed parameters{
+  real<lower=0> sigma_alpha;
+  real alpha[J];
+  real theta[J];
+  sigma_alpha <- fabs(xi);
+  for (j in 1:J){
+    alpha[j] <- xi * eta[j];
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  xi ~ normal(0, 4);
+  eta ~ normal(0, 1);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan33,echo=FALSE,cache=TRUE,dependson='stan32'>>=
+stan9.model <- stan_model(model_code = stan9.code, model_name = 'stan9')
+@
+<<stan34,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot2','stan33')>>=
+stan9.samp <- sampling(stan9.model, data = stan.data2,
+                         chains = 4, iter = 3500, warmup = 1000,
+                         init = 'random', seed = 2628)
+@
+
+<<stan35,echo=FALSE,cache=TRUE>>=
+stan10.code <- '
+data{
+  int J; // Number of groups
+  int n[J]; // Number of observations per group
+  real y_1[n[1]];
+  real y_2[n[2]];
+  real y_3[n[3]];
+  real y_4[n[4]];
+  real y_5[n[5]];
+  real y_6[n[6]];
+  real y_7[n[7]];
+  real y_8[n[8]];
+}
+
+parameters{
+  real mu;
+  real<lower=0> sigma_y;
+  real xi;
+  real eta[J];
+  real<lower=0> sigsq_eta;
+}
+
+transformed parameters{
+  real<lower=0> sigma_alpha;
+  real<lower=0> sigma_eta;
+  real alpha[J];
+  real theta[J];
+  sigma_eta <- pow(sigsq_eta, 0.5);
+  sigma_alpha <- fabs(xi) * sigma_eta;
+  for (j in 1:J){
+    alpha[j] <- xi * eta[j];
+    theta[j] <- mu + alpha[j];
+  }
+}
+
+model{
+  y_1 ~ normal(theta[1], sigma_y);
+  y_2 ~ normal(theta[2], sigma_y);
+  y_3 ~ normal(theta[3], sigma_y);
+  y_4 ~ normal(theta[4], sigma_y);
+  y_5 ~ normal(theta[5], sigma_y);
+  y_6 ~ normal(theta[6], sigma_y);
+  y_7 ~ normal(theta[7], sigma_y);
+  y_8 ~ normal(theta[8], sigma_y);
+  xi ~ normal(0, 3);
+  eta ~ normal(0, sigma_eta);
+  sigsq_eta ~ inv_chi_square(1);
+  increment_log_prob(pow(sigma_y, -1));
+}
+'
+@
+
+<<stan36,echo=FALSE,cache=TRUE,dependson='stan35'>>=
+stan10.model <- stan_model(model_code = stan10.code, model_name = 'stan10')
+@
+<<stan37,echo=FALSE,message=FALSE,warning=FALSE,cache=TRUE,dependson=c('fakeplot2','stan36')>>=
+stan10.samp <- sampling(stan10.model, data = stan.data2,
+                        chains = 4, iter = 3500, warmup = 1000,
+                        init = 'random', seed = 5364)
+@
+
+\begin{figure}[h!]
+<<stancomp4,echo=FALSE,cache=TRUE,dependson=c('stan25','stan28','stan30'),out.height='0.6\\linewidth',fig.height=6>>=
+sig.stan9 <- extract(stan9.samp, 'sigma_alpha')$sigma_alpha
+sig.stan10 <- extract(stan10.samp, 'sigma_alpha')$sigma_alpha
+
+par(mfcol = c(2, 2), mar = c(3.1, 2.1, 3.1, 2.1))
+sig.quants9 <- quantile(sig.stan9, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan9, freq = FALSE, breaks = 50, xlim = c(0, 2),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Folded-Normal Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 3.3), yaxt = 'n')
+segments(x0 = sig.quants9, y0 = 0, y1 = 3.2, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants9, y = 3.25, labels = round(sig.quants9, 2),
+     srt = 45, cex = 0.9)
+
+sig.quants10 <- quantile(sig.stan10, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(sig.stan10, freq = FALSE, breaks = 50, xlim = c(0, 2),
+     main = expression(bold('Posterior Distribution of'~sigma[alpha]~
+                              'from Half-Cauchy Prior')),
+     xlab = expression(sigma[alpha]), ylab = '',
+     ylim = c(0, 3.3), yaxt = 'n')
+segments(x0 = sig.quants10, y0 = 0, y1 = 3.2, lty = c(3, 2, 1, 2, 3))
+text(x = sig.quants10, y = 3.25, labels = round(sig.quants10, 2),
+     srt = 45, cex = 0.9)
+
+mu.stan9 <- extract(stan9.samp, 'mu')$mu
+mu.stan10 <- extract(stan10.samp, 'mu')$mu
+
+mu.quants9 <- quantile(mu.stan9, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan9, freq = FALSE, breaks = 50, xlim = c(18.5, 21.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Folded-Normal Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 3), yaxt = 'n')
+segments(x0 = mu.quants9, y0 = 0, y1 = 2.85, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants9, y = 2.9, labels = round(mu.quants9, 2),
+     srt = 45, cex = 0.9)
+
+mu.quants10 <- quantile(mu.stan10, c(0.025, 0.25, 0.5, 0.75, 0.975))
+hist(mu.stan10, freq = FALSE, breaks = 50, xlim = c(18.5, 21.5),
+     main = expression(bold('Posterior Distribution of'~mu~
+                              'from Half-Cauchy Prior')),
+     xlab = expression(mu), ylab = '', ylim = c(0, 3), yaxt = 'n')
+segments(x0 = mu.quants10, y0 = 0, y1 = 2.85, lty = c(3, 2, 1, 2, 3))
+text(x = mu.quants10, y = 2.9, labels = round(mu.quants10, 2),
+     srt = 45, cex = 0.9)
+@
+\caption{Comparison of posterior distributions of \(\sigma_\alpha\) and
+\(\mu\) from the redundant parameter model with two different priors, for
+the data with small between-group variation.
+Vertical lines mark the 0.025, 0.25, 0.5, 0.75, and 0.975 quantiles.
+Top: Folded Normal, scale 4.
+Bottom: Half-Cauchy, scale 3.}
+\label{stancomp4}
+\end{figure}
+
+The posterior distributions for \(\sigma_\alpha\) match each other
+closely, except that the posterior resulting from the
+inverse-Gamma(0.5, 0.5) prior is shifted right compared to the others
+and centered at 0.5. This makes no sense, so I also tried using
+inverse-Gamma(0.01, 0.01), inverse-Gamma(0.1, 0.1), and
+inverse-Gamma(1, 1). The inverse-Gamma(0.01, 0.01) resulted in a
+posterior that was tightly stacked against 0; the other two were very
+similar to the inverse-Gamma(0.5, 0.5) result. This was a very clear
+illustration that members of the inverse-Gamma\((\epsilon,\epsilon)\)
+family are not uninformative in this situation.
+
+The posterior distributions for \(\mu\) are all essentially the same, with
+the exception of slightly longer tails coming from the inverse-Gamma prior.
+
+Compared to the posterior distributions given the previous data, these
+posteriors for \(\sigma_\alpha\) have much smaller spreads. Except for
+the result from the inverse-Gamma prior, these posteriors allow the
+group-level variance to be very close to 0. None of the posteriors in
+problem 3 allowed that.
+
+Interestingly, the posterior distributions for \(\mu\) are also
+narrower than the posteriors in problem 3.
+
+\item %b
+
+\begin{figure}[h!]
+<<caterplot1,echo=FALSE>>=
+mualpha1 <- extract(stan8.samp, c('mu', 'alpha'))
+theta1 <- apply(mualpha1$alpha, 2, function(x){x + mualpha1$mu})
+qs1 <- quantile(mualpha1$mu, c(0.025, 0.25, NA, 0.75, 0.975))
+qs1[3] <- mean(mualpha1$mu)
+
+par(mfrow = c(1, 2), mar = c(4.1, 4.1, 4.1, 0.6))
+plot(y = 1:8, x = apply(theta1, 2, mean), pch = 19,
+     xlim = c(19.25, 20.75), yaxt = 'n', ylim = c(0.5, 8.5),
+     main = 'Posterior Group Means from Inverse-Gamma',
+     xlab = expression(mu+alpha[j]), ylab = 'Group')
+segments(y0 = 1:8, x0 = apply(theta1, 2, quantile, probs = 0.025),
+         x1 = apply(theta1, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta1, 2, quantile, probs = 0.25),
+         x1 = apply(theta1, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y2, mean), lwd = 2)
+abline(v = qs1, lty = c(3, 2, 1, 2, 3))
+axis(2, at = 1:8, las = 1)
+
+mualpha2 <- extract(stan10.samp, c('mu', 'alpha'))
+theta2 <- apply(mualpha2$alpha, 2, function(x){x + mualpha2$mu})
+qs2 <- quantile(mualpha2$mu, c(0.025, 0.25, NA, 0.75, 0.975))
+qs2[3] <- mean(mualpha2$mu)
+
+par(mar = c(4.1, 0.6, 4.1, 4.1))
+plot(y = 1:8, x = apply(theta2, 2, mean), pch = 19,
+     xlim = c(19.25, 20.75), yaxt = 'n', ylim = c(0.5, 8.5),
+     main = 'Posterior Group Means from Half-Cauchy',
+     xlab = expression(mu+alpha[j]), ylab = '')
+segments(y0 = 1:8, x0 = apply(theta2, 2, quantile, probs = 0.025),
+         x1 = apply(theta2, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta2, 2, quantile, probs = 0.25),
+         x1 = apply(theta2, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y2, mean), lwd = 2)
+abline(v = qs2, lty = c(3, 2, 1, 2, 3))
+@
+\caption{Posterior distributions of the group means, \(\mu+\alpha_j\).
+Vertical segments are the observed sample averages. Vertical lines
+the posterior mean, 0.025, 0.25, 0.75, and 0.975 quantiles of
+\(\mu+\alpha_j\) over all \(j\).}
+\label{cater1}
+\end{figure}
+
+Figure \ref{cater1} displays 50\% and 95\% posterior intervals for the
+group means from the models using inverse-Gamma and half-Cauchy priors.
+Both plots are nearly identical, despite the very different posteriors
+for \(\sigma_\alpha\). There is heavy shrinkage towards the overall
+mean, consistent with the between-group variance being close to 0.
+
+\item %c
+
+\begin{figure}[h!]
+<<caterplot2,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+par(mfrow = c(2, 2), mar = c(0.6, 4.1, 4.1, 0.6))
+plot(y = 1:8, x = apply(theta1, 2, mean), pch = 19,
+     xlim = c(17, 23), xaxt = 'n', yaxt = 'n', ylim = c(0.5, 8.5),
+     main = 'Posterior Group Means from Inverse-Gamma',
+     xlab = expression(mu+alpha[j]), ylab = 'Group')
+segments(y0 = 1:8, x0 = apply(theta1, 2, quantile, probs = 0.025),
+         x1 = apply(theta1, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta1, 2, quantile, probs = 0.25),
+         x1 = apply(theta1, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y2, mean), lwd = 2)
+abline(v = qs1, lty = c(3, 2, 1, 2, 3))
+axis(2, at = 1:8, las = 1)
+
+par(mar = c(0.6, 0.6, 4.1, 4.1))
+plot(y = 1:8, x = apply(theta2, 2, mean), pch = 19,
+     xlim = c(17, 22), xaxt = 'n', yaxt = 'n', ylim = c(0.5, 8.5),
+     main = 'Posterior Group Means from Half-Cauchy',
+     xlab = expression(mu+alpha[j]), ylab = '')
+segments(y0 = 1:8, x0 = apply(theta2, 2, quantile, probs = 0.025),
+         x1 = apply(theta2, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta2, 2, quantile, probs = 0.25),
+         x1 = apply(theta2, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y2, mean), lwd = 2)
+mtext('Second Dataset', side = 4, line = 3)
+abline(v = qs2, lty = c(3, 2, 1, 2, 3))
+
+mualpha3 <- extract(stan3.samp, c('mu', 'alpha'))
+theta3 <- apply(mualpha3$alpha, 2, function(x){x + mualpha3$mu})
+qs3 <- quantile(mualpha3$mu, c(0.025, 0.25, NA, 0.75, 0.975))
+qs3[3] <- mean(mualpha3$mu)
+
+par(mar = c(4.1, 4.1, 0.6, 0.6))
+plot(y = 1:8, x = apply(theta3, 2, mean), pch = 19,
+     xlim = c(17, 22), yaxt = 'n', ylim = c(0.5, 8.5),
+     main = ' ', xlab = expression(mu+alpha[j]), ylab = 'Group')
+segments(y0 = 1:8, x0 = apply(theta3, 2, quantile, probs = 0.025),
+         x1 = apply(theta3, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta3, 2, quantile, probs = 0.25),
+         x1 = apply(theta3, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y, mean), lwd = 2)
+abline(v = qs3, lty = c(3, 2, 1, 2, 3))
+axis(2, at = 1:8, las = 1)
+
+mualpha4 <- extract(stan5.samp, c('mu', 'alpha'))
+theta4 <- apply(mualpha4$alpha, 2, function(x){x + mualpha4$mu})
+qs4 <- quantile(mualpha4$mu, c(0.025, 0.25, NA, 0.75, 0.975))
+qs4[3] <- mean(mualpha4$mu)
+
+par(mar = c(4.1, 0.6, 0.6, 4.1))
+plot(y = 1:8, x = apply(theta4, 2, mean), pch = 19,
+     xlim = c(17, 22), yaxt = 'n', ylim = c(0.5, 8.5),
+     main = '', xlab = expression(mu+alpha[j]), ylab = '')
+segments(y0 = 1:8, x0 = apply(theta4, 2, quantile, probs = 0.025),
+         x1 = apply(theta4, 2, quantile, probs = 0.975), lwd = 1)
+segments(y0 = 1:8, x0 = apply(theta4, 2, quantile, probs = 0.25),
+         x1 = apply(theta4, 2, quantile, probs = 0.75), lwd = 3)
+segments(y0 = (1:8)-0.5, y1 = (1:8)+0.5, x0 = sapply(y, mean), lwd = 2)
+mtext('First Dataset', side = 4, line = 3)
+abline(v = qs4, lty = c(3, 2, 1, 2, 3))
+@
+\caption{Posterior distributions of the group means for both datasets.}
+\label{cater2}
+\end{figure}
+
+Figure \ref{cater2} compares the posterior distributions of the group
+means of both datasets. In both cases, the inverse-Gamma and half-Cauchy
+priors resulted in nearly identical posteriors. Very little shrinkage
+is seen for the first dataset. The intervals are centered near the
+sample averages, away from the overall mean. This is what we expect
+when the between-group variance is greater than 0.
+
+\end{enumerate}
+
+\end{enumerate}
+
+\end{document}

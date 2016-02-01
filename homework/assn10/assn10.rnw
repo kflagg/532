@@ -1,0 +1,973 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+\usepackage{enumitem}
+\setlist{parsep=5pt}
+
+\usepackage{float}
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 10}
+\author{Kenny Flagg}
+\date{November 24, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE,message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(LearnBayes)
+#require(rstan)
+#rstan_options(auto_write = TRUE)
+#options(mc.cores = parallel::detectCores())
+
+logit <- function(x){return(log(x/(1-x)))}
+expit <- function(x){return(1/(1+exp(-x)))}
+
+#extract <- function(x, ...) UseMethod('extract')
+#extract.mcmc.list <- function(x, pars){
+#  draws <- lapply(pars, function(i){unlist(x[,i])})
+#  names(draws) <- pars
+#  return(draws)
+#}
+#require(R2jags)
+@
+
+\begin{enumerate}
+
+\item %1
+
+I ran through the DIC example code and included the most interesting output
+below. The biggest thing that I wonder about is the
+distribution of the deviance for the draws under the no pooling model. It
+makes sense that the deviance is more variable, but I was surprised that the
+center was not shifted compare the distributions under the other models.
+However, seeing that it was centered so close to the others helped me
+understand what the penalty does.
+
+<<megan1,echo=FALSE>>=
+y.j <- c(28, 8, -3, 7, -1, 1, 18, 12)
+sig.j <- c(15, 10, 16, 11, 9, 11, 10, 18)
+data.mat <- cbind(y.j, sig.j)
+
+interval.fun <- function(y.sd, m) {y.sd[1] + c(-1,1)*y.sd[2]*m}
+est.pm.1SD <- apply(data.mat, 1, interval.fun, m=1)  #2x8
+est.pm.2SD <- apply(data.mat, 1, interval.fun, m=2)
+est.pm.3SD <- apply(data.mat, 1, interval.fun, m=3)
+#plot(seq(min(est.pm.3SD[1,])-0.5, max(est.pm.3SD[2,])+0.5,length=8),
+#     seq(0,9,length=8), type="n", xlab=" ", ylab=" ",yaxt="n")
+#mtext(c("A","B","C","D","E","F","G","H"), side=2, at=1:8, line=1,las=2)
+
+#Separate estimates
+#points(y.j, 1:8, pch="|", cex=1.2, col="purple")
+#segments(est.pm.3SD[1,], 1:8, est.pm.3SD[2,], 1:8, lwd=1, col=1)
+#segments(est.pm.2SD[1,], 1:8, est.pm.2SD[2,], 1:8, lwd=3, col="purple")
+#segments(est.pm.1SD[1,], 1:8, est.pm.1SD[2,], 1:8, lwd=5, col=4)
+
+##Add lines for completely pooled estimate
+#abline(v=7.7, lwd=2, col="orange")
+#abline(v=(7.7 + c(-1,1)*4.1*2), lwd=2, lty=2, col="orange")
+
+source("folded_t_functions.R")
+
+##Plot the density of the folded t
+#curve(d.tfold(x, df=2), xlim=c(0,5), ylim=c(0,0.85))  #plot for diff dfs
+#for (i in 1:20) { curve(d.tfold(x, df=i), xlim=c(0,5), col=i, add=TRUE)}
+
+#function to go with pg 520 in Gelman (2006) - Scaled
+#plot it for diff s - NOTE: not standardized!
+#curve(un.tfold(x, df=1, s=1), xlim=c(0,50), ylim=c(0,1))
+#for (i in 1:20){ curve(un.tfold(x, df=1, s=i), xlim=c(0,50), col=i, add=TRUE)}
+
+#function to obtain random draws from a scaled, non-central folded t
+#hist(r.tfold(10000, df=4, mn=0, s=1), nclass=100, col=gray(.5),
+#     freq=F, xlim=c(0,5), ylim=c(0,0.85))
+#curve(d.tfold(x, df=4), xlim=c(0,5), ylim=c(0,0.85), add=TRUE, col=2, lwd=2)
+#curve(un.tfold(x, df=1, s=5), xlim=c(0,50), ylim=c(0,1))  #Use for prior
+
+lp.tauGy.lik <- function(tau, y.j, sig.j) {  #log scale
+  V.mu.inv <- sum(1/(sig.j^2 + tau^2))
+  mu.hat <- (sum((1/(sig.j^2 + tau^2))*y.j))/V.mu.inv
+  part1 <- -0.5*log(V.mu.inv)
+  part2 <- sum(-0.5*log(sig.j^2 + tau^2) -
+                 0.5*((y.j - mu.hat)^2)/(sig.j^2 + tau^2))
+  out <- part1 + part2
+  return(out)
+}
+
+l.prior.t1 <- function(tau) { log(un.tfold(tau,df=1,s=5)) }
+
+## Function to combine lik and prior pieces and exponentiate
+lp.tauGy.t1 <- function(tau, y.j, sig.j){
+  lp.tauGy.lik(tau, y.j=y.j, sig.j=sig.j) + l.prior.t1(tau)
+}
+p.tauGy.t1 <- function(tau){
+  exp(lp.tauGy.lik(tau, y.j=y.j, sig.j=sig.j) + l.prior.t1(tau))
+}
+
+## Function to obtain value proportional to log(p(tau|y)) = marg post of tau
+## Using improper uniform prior on tau
+l.prior.unif <- function(tau) {log(1)}
+
+## Simple function to exponentiate results of above function
+lp.tauGy.unif <- function(tau,y.j, sig.j){
+  lp.tauGy.lik(tau, y.j=y.j, sig.j=sig.j) + l.prior.unif(tau)
+}
+p.tauGy.unif <- function(tau){
+  exp(lp.tauGy.lik(tau, y.j=y.j, sig.j=sig.j) + l.prior.unif(tau))
+}
+
+### Let's look at the prior vs. marginal posterior for tau
+### Plot p(tau|y) and p(tau) for the folded t and
+### plot p(tau|y) for the uniform
+grid.tau <- seq(0.001,50, length=5000) #play around with upper limit
+width <- grid.tau[2] - grid.tau[1]
+grid.tau.g.y<- apply(cbind(grid.tau), 1, p.tauGy.t1)  #for folded-t prior
+norm.grid.tau <- grid.tau.g.y/sum(grid.tau.g.y*width)
+grid.tau.g.y2<- apply(cbind(grid.tau), 1, p.tauGy.unif) #unif prior on tau
+norm.grid.tau2 <- grid.tau.g.y2/sum(grid.tau.g.y2*width)
+grid.tau.prior <- apply(cbind(grid.tau), 1, un.tfold, df=1, s=5)
+#sum(grid.tau.prior*width)
+norm.tau.prior <- grid.tau.prior/sum(grid.tau.prior*width) #grid version
+#plot(grid.tau, norm.grid.tau, type="n", xlim=c(0,50), ylim=c(0,0.22),
+#     xlab="tau", ylab="density")
+#lines(grid.tau, norm.tau.prior, col=2, lwd=2, lty=1) #folded-t prior
+#lines(grid.tau, norm.grid.tau, col=3, lwd=2)  #marg. post with foldedt
+#lines(grid.tau, norm.grid.tau2, col=4, lwd=3, lty=1)
+#legend(15,0.16,
+#       legend=c("folded-t prior (df=1, s=5)","p(tau|y) (p(tau) = folded-t)",
+#                "p(tau|y) (p(tau)= unif)"),
+#       lwd=c(2,2,2), lty=c(1,1,1), col=c(2,3,4), bty="n")
+
+l.prior.logunif <- function(tau) {log(1/tau)}
+## Simple function to exponentiate results of above function
+p.tauGy.logunif <- function(tau){
+  exp(lp.tauGy.lik(tau, y.j=y.j, sig.j=sig.j) + l.prior.logunif(tau))
+}
+grid.tauGy.logunif <- apply(cbind(grid.tau), 1, p.tauGy.logunif)
+norm.grid.logunif <- grid.tauGy.logunif/sum(grid.tauGy.logunif*width)
+
+##ZOOM in on lower values of tau
+#plot(grid.tau, norm.grid.logunif, type="n", xlim=c(0,4), ylim=c(0,0.4),
+#     xlab="tau", ylab="density")
+#lines(grid.tau, norm.grid.logunif, col=5, lwd=3, lty=1) #unif on log(tau)
+#lines(grid.tau, norm.tau.prior, col=2, lwd=2, lty=1) #folded-t prior
+#lines(grid.tau, norm.grid.tau, col=3, lwd=2)  #marg. post with foldedt
+#lines(grid.tau, norm.grid.tau2, col=4, lwd=3, lty=1) #unif on tau
+#legend(1.75,0.4,
+#       legend=c("folded-t prior (df=1, s=5)","p(tau|y) (p(tau) = folded-t)",
+#                "p(tau|y) (p(tau)= unif)", "p(tau|y)  (p(log(tau))= unif)" ),
+#       lwd=c(3,3,3,3), lty=c(1,1,1,1), col=c(2,3,4,5), bty="n")
+
+nsamp <- 5000
+set.seed(87235)
+tau.vec <- numeric(nsamp)  #save draws u
+tau.vec2 <- numeric(nsamp) #save draws using uniform prior
+tau.vec[1] <- 10  #starting value
+tau.vec2[1] <- 10
+for (t in 2:nsamp){
+  tau.cur <- tau.vec[t-1] ##FOLDED-t sampling
+  #tau.cand <- r.tfold(1, df=2, mn=tau.cur) #jumping distn centered on current
+  tau.cand <- r.tfold(1, df=2, s=4, mn=0)
+  l.p.cand <- lp.tauGy.t1(tau.cand, y.j, sig.j)
+  l.p.cur <- lp.tauGy.t1(tau.cur, y.j, sig.j)
+  l.j.cand <- log(un.tfold(tau.cand, df=2, s=4))
+  l.j.cur <- log(un.tfold(tau.cur, df=2, s=4))
+  log.rat <- l.p.cand - l.p.cur + l.j.cur - l.j.cand
+  r <- min(1, exp(log.rat))
+  ifelse(runif(1)<r, tau.vec[t] <- tau.cand, tau.vec[t] <- tau.cur)
+  tau.cur2 <- tau.vec2[t-1]  #UNIFORM sampling
+  tau.cand2 <- r.tfold(1, df=2, s=4, mn=0)
+  l.p.cand2 <- lp.tauGy.unif(tau.cand2, y.j, sig.j)
+  l.p.cur2 <- lp.tauGy.unif(tau.cur2, y.j, sig.j)
+  l.j.cand2 <- log(un.tfold(tau.cand2, df=2, s=4))
+  l.j.cur2 <- log(un.tfold(tau.cur2, df=2, s=4))
+  log.rat2 <- l.p.cand2 - l.p.cur2 + l.j.cur2 - l.j.cand2
+  r2 <- min(1, exp(log.rat2))
+  ifelse(runif(1)<r2, tau.vec2[t] <- tau.cand2, tau.vec2[t] <- tau.cur2)
+}
+
+#hist(tau.vec, nclass=20, col=gray(.5), freq=F, main="Folded-t prior",
+#     xlab="tau|y", xlim=c(0,50), ylim=c(0,0.2))
+#lines(grid.tau, norm.grid.tau, col=3, lwd=2)  #marg. post with foldedt
+#hist(tau.vec2, nclass=40, col=gray(.5), freq=F, main="Unif prior",
+#     xlab="tau|y", xlim=c(0,50), ylim=c(0,0.2))
+#lines(grid.tau, norm.grid.tau2, col=4, lwd=3, lty=1) #unif on tau
+
+#plot(1:nsamp, tau.vec2, type="n", main="Sample path plots", ylim=c(0,60))
+#lines(1:nsamp, tau.vec2, col=3)
+#lines(1:nsamp, tau.vec, col=2) #looks more reasonable to me?
+#legend(100,58, legend=c("folded-t prior (df=1, s=5)","Uniform prior"),
+#       lwd=c(2,2), lty=c(1,1), col=c(2,3), bty="n")
+#plot(1:nsamp, log(tau.vec2), type="n", main="Sample path plots", ylim=c(-5,5))
+#lines(1:nsamp, log(tau.vec2), col=3)
+#lines(1:nsamp, log(tau.vec), col=2) #looks more reasonable to me?
+#legend(100,5.2, legend=c("folded-t prior (df=1, s=5)","Uniform prior"),
+#       lwd=c(2,2), lty=c(1,1), col=c(2,3), bty="n")
+
+r.mu.g.tau.y <- function(tau, y.j, sig.j){
+  V.mu <- 1/(sum(1/(sig.j^2 + tau^2)))
+  mu.hat <- (sum((1/(sig.j^2 + tau^2))*y.j))*V.mu
+  draw <- rnorm(1, mu.hat, sd=sqrt(V.mu))
+  return(draw)
+}
+
+#Actually get the draws under the two different priors for tau
+mu.vec <- apply(cbind(tau.vec), 1, r.mu.g.tau.y, y.j=y.j, sig.j=sig.j)
+mu.vec2 <- apply(cbind(tau.vec2), 1, r.mu.g.tau.y, y.j=y.j, sig.j=sig.j)
+
+#Take a look at results for mu|y under the two different priors
+#hist(mu.vec, nclass=50, col=gray(.7), freq=F, main="Folded-t prior",
+#     xlab="mu|y", xlim=c(-10,30))
+#hist(mu.vec2, nclass=50, col=gray(.7), freq=F, main="Improper Unif. prior",
+#     xlab="mu|y", xlim=c(-10,30))
+
+#Look at summary measures to help compare the marginal distributions of mu|y
+# under the two priors
+#summary(mu.vec)
+#summary(mu.vec2)
+#quantile(mu.vec, c(0.025, .975))
+#quantile(mu.vec2, c(0.025, .975))
+#mean(mu.vec>28) #0
+#mean(mu.vec2>28) #0.003
+
+###STEP 3: Obtain samples from (theta_{j}|mu,tau,y)=N(theta.j.hat, Vj)
+#Function to get a draw
+r.thetaj.g.mu.tau.y <- function(mu.tau, y.j, sig.j){
+  V.j <- 1/((1/(sig.j^2)) + (1/(mu.tau[2]^2)))
+  theta.hat.j <- ((y.j/(sig.j^2)) + (mu.tau[1]/(mu.tau[2]^2)))*V.j
+  theta.draws <- rnorm(8, theta.hat.j, sqrt(V.j))
+  return(theta.draws)
+}
+
+#Apply function to get vector of draws for each theta.j
+theta.mat <- t(apply(cbind(mu.vec,tau.vec), 1, r.thetaj.g.mu.tau.y,
+                     y.j=y.j, sig.j=sig.j))
+theta.mat2 <- t(apply(cbind(mu.vec2,tau.vec2), 1, r.thetaj.g.mu.tau.y,
+                      y.j=y.j, sig.j=sig.j))
+
+
+###############################################################
+### First load data and run MCMC code to get posterior samples
+### From code in SchoolsNormalHierarchicalExample_F15.R  #####
+### theta.mat (folded-t) and theta.mat2 (unif) for tau   #####
+### Updated Fall 2015                                    #####
+##############################################################
+
+### Think about residuals
+
+### theta.mat is 5000 x 8
+
+resid.fun <- function(theta.j, y.j){y.j - theta.j}
+resid.out <- apply(theta.mat, 1, resid.fun, y.j=y.j) #8x5000
+#x11()
+#par(mfrow=c(2,4), mar=c(4,4,2,2))
+#for (s in 1:8){
+#  plot(theta.mat[s,], resid.out[,s], pch=16, cex=1.2,
+#       ylim=c(-20,35), xlim=c(-15,30))
+#}
+
+###Versus just plugging in the posterior mean of theta
+theta.mns <- apply(theta.mat,2,mean)
+#par(mfrow = c(1,1))
+#plot(theta.mns, (y.j-theta.mns), pch=16, cex=1.2,
+#     ylim=c(-20,35), xlim=c(-15,30), main="Using posterior MEAN", col=2)
+
+### Think about average wt'd sum of squared resids (approx deviance)
+avg.wt.sq.resid.fun <- function(theta.j, y.j, sig.j){
+  mean(((y.j-theta.j)^2)/(sig.j^2))
+}
+#at posterior means
+avg.sq.resid.pm <- avg.wt.sq.resid.fun(theta.mns, y.j=y.j, sig.j=sig.j)
+#at overall mean
+avg.sq.resid.pool <- avg.wt.sq.resid.fun(rep(mean(y.j),8),
+                                         y.j=y.j, sig.j=sig.j)
+
+##Do for EACH posterior draw to get posterior distribution
+post.avg.sq.resid <- apply(theta.mat, 1, avg.wt.sq.resid.fun,
+                           y.j=y.j, sig.j=sig.j)
+
+#par(mfrow=c(1,1))
+#hist(post.avg.sq.resid, nclass=100, col=gray(0.9),
+#     main="Posterior of Average Weighted Squared Resids", freq=FALSE)
+#abline(v=avg.sq.resid.pm, lwd=2, col=2)  #Using posterior mean as plug-in
+#abline(v=avg.sq.resid.pool, lwd=2, col=4)  #using overall mean as plug-in
+#legend(1.5,3.0, legend=c("posterior means", "overall mean"), col=c(2,4),
+#       lwd=c(2,2), lty=c(1,1), bty="n")
+
+## CHANGED IN _F15 version
+## Now each y.rep is only used with its generating theta, rather than moving
+## over all theta for a y.rep like we do for the observed data.
+## BUT, can also do for y.rep's (for these 8 schools)
+n_draws <- length(theta.mat[,1])
+y.rep.mat <- matrix(NA, nrow=n_draws, ncol=8)
+for (j in 1:8){
+  y.rep.mat[,j] <- rnorm(n_draws, mean=theta.mat[,j], sd=sig.j[j])
+}
+
+#Write function to calculate wt'd MSE for different draws of (theta, yrep)
+T.yrep.mse.fun <- function(theta_yrep, sig.j){
+  avg.wt.sq.resid.fun(theta.j=theta_yrep[1:8],
+                      y.j=theta_yrep[9:16], sig.j=sig.j)
+}
+
+theta_yrep_mat <- cbind(theta.mat,y.rep.mat) #5000 x 16
+choose.draws <- sample(500:5000, size=1000) #choose draws randomly after 500
+T.yrep.theta <- apply(theta_yrep_mat[choose.draws,], 1,
+                      T.yrep.mse.fun, sig.j=sig.j)
+
+#par(mfrow=c(1,2))
+#plot(post.avg.sq.resid[choose.draws], T.yrep.theta, pch=16,
+#     cex=1.2, xlim=c(0,5), ylim=c(0,5),
+#     xlab="Posterior MSE (y_obs)", ylab="Posterior MSE (y_preds)")
+#abline(a=0, b=1)
+#abline(v=c(avg.sq.resid.pm,avg.sq.resid.pool), col="orange")
+#Why would it make sense for ypreds to have more larger values
+# for this application?
+
+#Proportion of posterior predictive draws such that the
+# T(yrep,theta) is greater than or equal to T(yobs)?
+#mean(T.yrep.theta >= post.avg.sq.resid[choose.draws]) #.707
+
+### Or histograms of differences?
+#hist((post.avg.sq.resid[choose.draws]-T.yrep.theta),
+#     col=gray(0.8), nclass=100, xlim=c(-3,3),
+#     main="T(y,theta)-T(yrep,theta)", xlab="Difference")
+#     abline(v=0, col=2)
+
+#at posterior means
+avg.sq.resid.pm <- avg.wt.sq.resid.fun(theta.mns, y.j=y.j, sig.j=sig.j)
+#avg.sq.resid.pool
+
+### More general: Compare deviance among models:
+Dev.fun <- function(theta.j, y.j, sig.j){
+  -2*sum(log(dnorm(y.j, theta.j, sig.j)))
+}
+#Dev.fun(y.j, y.j, sig.j)
+
+#1. Calculate D.theta.hat
+burn.in <- 500
+#a. Find a theta.hat - use posterior means
+post.mns <- apply(theta.mat[-(1:burn.in),],2,mean)
+post.mns2 <- apply(theta.mat2[-(1:burn.in),],2,mean)
+#b. Plug in posterior means to deviance function
+D.theta.hat <- Dev.fun(post.mns, y.j, sig.j)     #58.35
+D.theta.hat2 <- Dev.fun(post.mns2, y.j, sig.j)   #57.40 ("matches" book)
+
+#2. Calculate D.avg.hat
+#a. Apply the deviance function to every set of posterior draws of theta
+Dev.draws <- apply(theta.mat[-(1:burn.in),],1,Dev.fun, y.j=y.j, sig.j=sig.j)
+Dev.draws2 <- apply(theta.mat2[-(1:burn.in),],1,Dev.fun, y.j=y.j, sig.j=sig.j)
+#par(mfrow=c(2,1))
+#hist(Dev.draws, col=gray(.5), nclass=100, main="Deviance (folded-t)",
+#     xlim=c(50,80),	xlab=expression(D(y,theta)), freq=F, ylim=c(0,0.4))
+#abline(v=D.theta.hat, col=2, lwd=2)
+#text(56,0.4, expression(D[hat(theta)]))
+#hist(Dev.draws2, col=gray(.5), nclass=100, main="Deviance (uniform)",
+#     xlim=c(50,80), xlab=expression(D(y,theta)), freq=F, ylim=c(0,0.4))
+#abline(v=D.theta.hat2, col=2, lwd=2)
+#text(55,0.4, expression(D[hat(theta)]))
+#b. Average the deviance over all the draws
+D.avg.hat <- mean(Dev.draws)     #60.227
+D.avg.hat2 <- mean(Dev.draws2)   #60.2916
+#abline(v=D.avg.hat2, col="orange", lwd=2) #add to histogram for uniform
+#text(65, 0.4, expression(bar[D(theta)]))
+
+#3. Calculate the effective number of parameters (pD) using the two
+#    different methods in the book (pg 181,182): pD1 and pD2
+pD1 <- D.avg.hat - D.theta.hat       #1.9
+pD1.2 <- D.avg.hat2 - D.theta.hat2   #2.78
+
+#pD2 is approximately 1/2 the posterior variance of the deviance
+pD2 <- 0.5*var(Dev.draws)  #1.82
+pD2.2 <- 0.5*var(Dev.draws2) #2.48
+
+#4. Combine to get DIC= D.pred.avg.hat = 2*D.avg.hat - D.theta.hat
+#                                      = D.avg.hat + p.D1
+DIC.foldedt <- D.avg.hat + pD1    #62.03
+DIC.uniform <- D.avg.hat2 + pD1.2   #63.03
+
+#5. Get DIC for the no pooling (tau=infinity) model (separate means model)
+D.theta.hat.nopool <- Dev.fun(y.j, y.j, sig.j)  #54.64
+
+#Drawing nsamp-burn.in draws of 8 draws from separate means and variances
+theta.mat.nopool <- t(replicate(nsamp-burn.in, rnorm(8, mean=y.j, sd=sig.j)))
+#4500x8
+Dev.draws.nopool <- apply(theta.mat.nopool,1, Dev.fun, y.j=y.j, sig.j=sig.j)
+D.avg.hat.nopool <- mean(Dev.draws.nopool)  #62.65
+pD1.nopool <- D.avg.hat.nopool - D.theta.hat.nopool  #8.00
+DIC.nopool <- D.avg.hat.nopool + pD1.nopool  #70.66
+
+#6. Get DIC for the complete pooling (tau=0) model (single mean model)
+mu.hat.tau0 <- sum(y.j/(sig.j^2))/sum(1/(sig.j^2)) #See page 136
+sig.mu.tau0 <- sqrt(1/(sum(1/(sig.j^2))))
+D.theta.hat.pool <- Dev.fun(rep(mean(mu.vec[burn.in:5000]),8), y.j, sig.j)
+#59.41682
+
+theta.mat.pool <- t(replicate(nsamp-burn.in,
+                              rnorm(8, mean=mu.hat.tau0, sd=sig.mu.tau0)))
+Dev.draws.pool <- apply(theta.mat.pool,1, Dev.fun, y.j=y.j, sig.j=sig.j)
+D.avg.hat.pool <- mean(Dev.draws.pool)  #60.3
+pD1.pool <- D.avg.hat.pool - D.theta.hat.pool  #0.99
+DIC.pool <- D.avg.hat.pool + pD1.pool   #61.3
+@
+
+<<megan2,echo=FALSE,out.height='0.6\\linewidth',fig.height=6>>=
+####Compare posterior deviance distributions between hiearch. and
+par(mfrow=c(2,2))
+hist(Dev.draws, col=gray(.5), nclass=100, main="Deviance (folded-t)",
+     xlim=c(50,80), xlab=expression(D(y,theta)), freq=F, ylim=c(0,0.4))
+abline(v=c(D.theta.hat, D.avg.hat, DIC.foldedt), col=c(2,4,5), lwd=2)
+text(56,0.4, expression(D[hat(theta)]))
+hist(Dev.draws2, col=gray(.5), nclass=100, main="Deviance (uniform)",
+     xlim=c(50,80), xlab=expression(D(y,theta)),freq=F, ylim=c(0,0.4))
+abline(v=c(D.theta.hat2, D.avg.hat2, DIC.uniform), col=c(2,4,5), lwd=2)
+text(55,0.4, expression(D[hat(theta)]))
+hist(Dev.draws.nopool, col=gray(.5), nclass=100, main="Deviance (No pooling)",
+     xlim=c(50,80), xlab=expression(D(y,theta)), freq=F, ylim=c(0,0.4))
+abline(v=c(D.theta.hat.nopool, D.avg.hat.nopool, DIC.nopool),
+       col=c(2,4,5), lwd=2)
+text(56,0.4, expression(D[hat(theta)]))
+text(65,0.4, expression(bar(D(theta))))
+text(72,0.4, "DIC")
+hist(Dev.draws.pool, col=gray(.5), nclass=100, main="Deviance (Complete Pool)",
+     xlim=c(50,80), xlab=expression(D(y,theta)),freq=F, ylim=c(0,0.4))
+abline(v=c(D.theta.hat.pool, D.avg.hat.pool, DIC.pool), col=c(2,4,5), lwd=2)
+text(55,0.4, expression(D[hat(theta)]))
+@
+
+%\begin{center}
+<<megan3,echo=FALSE,results='asis'>>=
+#### Make table of results like Table 6.2
+out.table <- data.frame(
+  D.theta.hat=round(c(D.theta.hat,D.theta.hat2,D.theta.hat.nopool,
+                      D.theta.hat.pool), digits=2),
+  D.avg.hat= round(c(D.avg.hat,D.avg.hat2,D.avg.hat.nopool,D.avg.hat.pool),
+                   digits=2),
+  pD=round(c(pD1, pD1.2, pD1.nopool, pD1.pool),digits=2),
+  DIC=round(c(DIC.foldedt, DIC.uniform, DIC.nopool, DIC.pool), digits=2),
+  row.names=c("Folded-t", "Uniform", "No pooling", "Complete pool")
+  )
+#print(xtable(out.table), floating = FALSE)
+@
+%\end{center}
+
+<<megan4,echo=FALSE>>=
+#### Also think of DIC as trying to get at Expected MSE using
+#posterior predictive dist'n
+##  Averaging over all values in y.rep.  Can we do that?
+##  We already did it for the weighted MSE, let's just do it for unweighted
+## avg.sq.resid = (1/n)*sum((yi.rep - E(yi.rep|y))^2)
+sum.sq.resid.yrep.fun <- function(y.rep, E.yrep, sig.j){
+  #mean(((y.rep-E.yrep)^2))
+  sum(((y.rep-E.yrep)/sig.j)^2)
+}
+
+yrep.post.mns <- apply(y.rep.mat, 2, mean)
+T2.yrep.theta <- apply(y.rep.mat, 1, sum.sq.resid.yrep.fun,
+                       E.yrep=yrep.post.mns, sig.j=sig.j)
+T2.yrep.DICcompare <- -2*(sum(-0.5*(log(2*pi*(sig.j^2)))) - 0.5*T2.yrep.theta)
+#mean(T2.yrep.DICcompare)  #64.32
+
+### Or can get this by calculating expected deviance of yreps
+# at posterior means
+###Approximate Eyrep[D(yrep,theta.ha)] = Eyrep[-2*log(p(yrep|thetaha))]
+Dev.pred.fun <- function(yrep,theta.hat, sig.j){
+  -2*sum(dnorm(yrep, theta.hat, sig.j, log=TRUE))
+}
+D.pred <- apply(y.rep.mat,1,Dev.pred.fun, theta.hat=post.mns, sig.j=sig.j)
+par(mfrow=c(1,1))
+#hist(D.pred, col=gray(.5), nclass=100,
+#     main="Post Pred. Deviance at Posterior Means",
+#     xlab="Post Pred Deviance", freq=F, xlim=c(40,150))
+#abline(v=DIC.foldedt, col=c(5,"purple","purple"), lwd=2)
+D.pred.avg <- mean(D.pred) #64.32
+
+#par(mfrow=c(1,2))
+#hist(Dev.draws, col=gray(.5), nclass=100, main="Deviance (folded-t)",
+#     xlim=c(50,80), xlab=expression(D(y,theta)), freq=F, ylim=c(0,0.4))
+#abline(v=c(D.theta.hat, D.avg.hat, DIC.foldedt), col=c(2,4,5), lwd=2)
+#text(56,0.4, expression(D[hat(theta)]))
+#hist(T2.yrep.DICcompare, col=gray(.5), nclass=150,
+#     main="Post. Pred. MSE (DIC scale)",
+#     xlab="post pred MSE (Dev. scale)", freq=F, xlim=c(50,80))
+#abline(v=c(DIC.foldedt, mean(T2.yrep.DICcompare), median(T2.yrep.DICcompare)),
+#       col=c(5,"purple","magenta"), lwd=2)
+#abline(v=D.pred.avg, col="orange", lwd=2)
+
+### Posterior predictive loss - MSPE- focus on error between yi's and y.rep's
+SSPE.fun <- function(y.rep, y, sig.j){
+  #mean(((y-y.rep)^2))
+  sum(((y-y.rep)/sig.j)^2)
+}
+T.SSPE <- apply(y.rep.mat, 1, SSPE.fun, y=y.j, sig.j=sig.j)
+T.SSPE.DevScale <- -2*(sum(-0.5*(log(2*3.1415926*(sig.j^2)))) - 0.5*T.SSPE)
+#mean(T.SSPE.DevScale) #68.17
+
+#### Let's look at WAIC - Chapter 7 in Gelman et al.
+## Watanabe-Akaike or "widely available information criterion"
+## More fully Bayesian approach for estimating out-of-sample expectation
+## starting with computed log pointwise posterior predictive density, then
+## addeing correction for effective number of parameters to adjust for
+## overfitting
+## Advantage = averages over the posterior distribution rather than
+# conditioning on pt. est.
+
+#Can use dev.draws and dev.draws2 from earlier
+l.p.y.g.theta.sepj.fun <- function(theta.j, y.j, sig.j){
+  dnorm(y.j, theta.j, sig.j, log=TRUE)
+}
+#l.p.y.g.theta.sepj.fun(theta.mat[2,], y.j, sig.j)
+
+p.y.g.theta.sepj.fun <- function(theta.j, y.j, sig.j){
+  dnorm(y.j, theta.j, sig.j)
+}
+#p.y.g.theta.sepj.fun(theta.mat[2,], y.j, sig.j)
+
+lp.y.g.theta.sepj <- apply(theta.mat, 1, l.p.y.g.theta.sepj.fun,
+                           y.j=y.j, sig.j=sig.j) #2nd part of pWAIC
+#dim(lp.y.g.theta.sepj) #8 x 5000
+
+### Calculate p.y.g.theta for each theta, then average, then take log
+# to get computed lppd?
+p.y.g.theta.sepj <- apply(theta.mat, 1, p.y.g.theta.sepj.fun,
+                          y.j=y.j, sig.j=sig.j) #calculate for each theta
+mean.dev.sepj <- apply(p.y.g.theta.sepj, 1, mean) #average over theta
+log.mean.dev.sepj <- log(mean.dev.sepj) #take log
+est.lppd <- sum(log.mean.dev.sepj)
+
+#### Calculate the pWAIC1
+pD.WAIC1 <- 2*(sum(log.mean.dev.sepj - mean(lp.y.g.theta.sepj)))
+#pD.WAIC1
+
+#### Calculate the pWAIC2
+var.sepj <- apply(lp.y.g.theta.sepj, 1, var)
+pD.WAIC2 <- sum(var.sepj)  #See Equation 7.12 in text #1.009749
+#pD.WAIC2
+
+### Calculate WAIC2 on deviance scale
+WAIC2 <- -2*(est.lppd - pD.WAIC2)  #61.40
+#WAIC2
+WAIC1 <- -2*(est.lppd - pD.WAIC1)
+#WAIC1
+
+### For the Uniform prior  ###
+lp.y.g.theta.sepj.2 <- apply(theta.mat2, 1, l.p.y.g.theta.sepj.fun,
+                             y.j=y.j, sig.j=sig.j) #2nd part of pWAIC
+p.y.g.theta.sepj.2 <- apply(theta.mat2, 1, p.y.g.theta.sepj.fun,
+                            y.j=y.j, sig.j=sig.j) #calculate for each theta
+mean.dev.sepj.2 <- apply(p.y.g.theta.sepj.2, 1, mean) #average over theta
+log.mean.dev.sepj.2 <- log(mean.dev.sepj.2) #take log
+est.lppd.2 <- sum(log.mean.dev.sepj.2)
+var.sepj.2 <- apply(lp.y.g.theta.sepj.2, 1, var)
+pD.WAIC2.2 <- sum(var.sepj.2)  #See Equation 7.12 in text #1.009749
+WAIC2.2 <- -2*(est.lppd.2 - pD.WAIC2.2)
+
+#### Look at approximate classical estimate of tau2 - using Deviance
+# from one mean model (red) vs.
+####  SS of 8 mean model (full)   tau2.hat <- MSB - MSW
+ExtraDev <- (59.35-54.64)
+ExtraDf <- (8-1)
+FullDev <- 54.54
+FullDf <- 8
+tau.2.est <- (ExtraDev/ExtraDf) - (FullDev/FullDf)
+
+#### Conditional AIC -
+#### How to count parameters for the hierachical model?
+### What if used hierarchical model, but only interested in the overall
+### mean and not the means of the
+####  individual schools?
+@
+
+\begin{center}
+<<megan5,echo=FALSE,results='asis'>>=
+#Calculate AIC:   AIC = -2log(p(y|mu.hat,tau.hat)) + 2p
+AIC.hm.uniform <- D.theta.hat2 + 2*2     #61.548 = 2 params are mu and tau2?
+AIC.hm.foldedt <- D.theta.hat + 2*2      #62.404 = 2 params are mu and tau2
+AIC.pool <- D.theta.hat.pool + 2*1       #61.349
+AIC.nopool <- D.theta.hat.nopool + 2*8   #70.641
+out.table <- data.frame(
+  D.theta.hat=round(c(D.theta.hat,D.theta.hat2,
+                      D.theta.hat.nopool,D.theta.hat.pool), digits=2),
+  D.avg.hat= round(c(D.avg.hat,D.avg.hat2,D.avg.hat.nopool,D.avg.hat.pool),
+                   digits=2),
+  pD=round(c(pD1, pD1.2, pD1.nopool, pD1.pool),digits=2),
+  DIC=round(c(DIC.foldedt, DIC.uniform, DIC.nopool, DIC.pool), digits=2),
+  AIC=round(c(AIC.hm.foldedt, AIC.hm.uniform, AIC.nopool, AIC.pool), digits=2),
+  WAIC=round(c(WAIC2, WAIC2.2, NA, NA), digits=2),
+  row.names=c("Folded-t", "Uniform", "No pooling", "Complete pool")
+  )
+print(xtable(out.table), floating = FALSE)
+
+#### Bayes factor between the pooled vs. no pooled model?
+## Can't do it under the improper prior for theta
+## Ratio unstable for large values of tau2 and undefined for tau=inf
+## See Section 7.4 in text
+@
+\end{center}
+
+\pagebreak
+\item %2
+
+Use the Beta-Binomial model to investigate whether people prefer Liz's
+cupcakes over Megan's cupcakes. 21 out of 28 tasters prefered Liz's cupcakes.
+
+\begin{enumerate}
+
+\item %a
+
+The model is
+\begin{align*}
+y|\pi&\sim\mathrm{Binomial}(28,\pi);\\
+\pi&\sim\mathrm{Beta}(\alpha,\beta)
+\end{align*}
+where \(y\) is the number of tasters who prefer Liz's cupcakes and \(\pi\)
+is the probability that a taster prefers Liz's cupcakes.
+
+Choosing an informative prior in this situation is difficult because I have
+had 15 or 20 of Liz's cupcakes and thought each was the best cupcake ever,
+but I have not had a cupcake made by Megan. However, knowing the how much
+dilligence and attention to detail Megan puts into all of her work, I
+expect that she would make an excellent cupcake that might be a contender
+against Liz's cupcakes. I would expect Megan's cupcakes to be preferred half
+as often as Liz's, so I consider distributions of the form
+\(\mathrm{Beta}(\alpha, \alpha/2)\). Setting \(\alpha=15\) to represent my
+prior experience with Liz's cupcakes is unfair because I have not compared
+them to 7.5 cupcakes made by Megan. I chose the flatter
+\(\mathrm{Beta}(6,3)\) distribution, which has a prior probability
+\(Pr(\pi<0.5)=0.145\) to give Megan a fighting chance. This prior is
+illustrated in Figure \ref{myprior}.
+
+\begin{figure}[h!]\begin{center}
+<<myprior,echo=FALSE,out.width='0.5\\linewidth',fig.width=5,out.height='0.3\\linewidth',fig.height=3>>=
+par(mar = c(4.1, 1.1, 2.1, 1.1))
+plot(x = NA, y = NA, xlim = c(0, 1), ylim = c(0, 3),
+     frame.plot = FALSE, yaxt = 'n',
+      main = expression(bold(pi*'~Beta'(list(6,3))~Density)),
+      xlab = expression(pi), ylab = '')
+polygon(x = c(seq(0, 0.5, 0.01), 0.5, 0),
+        y = dbeta(c(seq(0, 0.5, 0.01), 0, 0), 6, 3),
+        col = '#D0D0D0', border = NA)
+curve(dbeta(x, 6, 3), lwd = 2, add = TRUE)
+segments(x0 = 2/3, y0 = 0, y1 = 2.65)
+text(x = c(0.42, 2/3), y = c(0.3, 2.8), c('0.145', '0.667'))
+@
+\caption{The informative prior distibution. The shaded area shows the prior
+probability of 0.145 that Megan's cupcakes are prefered more often than Liz's
+cupcakes. The vertical line marks the prior mean of 0.667.}
+\label{myprior}
+\end{center}\end{figure}
+
+For comparison, I also used \(\mathrm{Beta}(0, 0)\), \(\mathrm{Beta}(1, 1)\),
+and \(\mathrm{Beta}(2, 2)\) priors. These all have prior means of 0.5 and are
+condisered default uninformative priors.
+
+In the double-blind taste test, 21 of 28 tasters prefered Liz's cupcakes.
+The resulting posterior distributions appear in Figure \ref{cupposts}.
+
+\begin{figure}[h!]
+<<cupposts,echo=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+par(mfrow = c(2, 2), mar = c(4.1, 1.1, 4.1, 1.1))
+curve(dbeta(x, 0, 0), from = 0, to = 1, frame.plot = FALSE, col = 'grey',
+      main = 'Beta(21, 7) Posterior Distribution', yaxt = 'n',
+      xlab = expression(pi), ylab = '', ylim = c(0, 6.5))
+segments(x0 = 0:1, y0 = 0, y1 = 6.5, col = 'grey')
+curve(dbeta(x, 21, 7), lwd = 2, add = TRUE)
+mtext('From Beta(0, 0) Prior', 3)
+segments(x0 = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 21, 7), 21/28),
+         y0 = 0, y1 = 5.5,
+       lty = c(3, 2, 2, 3, 1))
+text(x = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 21, 7), 21/28), y = 6,
+    labels = c(round(c(qbeta(c(0.025, 0.25, 0.75, 0.975), 21, 7), 21/28), 3)),
+    srt = 45)
+
+curve(dbeta(x, 1, 1), from = 0, to = 1, frame.plot = FALSE, col = 'grey',
+      main = 'Beta(22, 8) Posterior Distribution', yaxt = 'n',
+      xlab = expression(pi), ylab = '', ylim = c(0, 6.5))
+curve(dbeta(x, 22, 8), lwd = 2, add = TRUE)
+mtext('From Beta(1, 1) Prior', 3)
+segments(x0 = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 22, 8), 22/30),
+         y0 = 0, y1 = 5.5,
+       lty = c(3, 2, 2, 3, 1))
+text(x = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 22, 8), 22/30), y = 6,
+    labels = c(round(c(qbeta(c(0.025, 0.25, 0.75, 0.975), 22, 8), 22/30), 3)),
+    srt = 45)
+
+curve(dbeta(x, 2, 2), from = 0, to = 1, frame.plot = FALSE, col = 'grey',
+      main = 'Beta(23, 9) Posterior Distribution', yaxt = 'n',
+      xlab = expression(pi), ylab = '', ylim = c(0, 6.5))
+curve(dbeta(x, 23, 9), lwd = 2, add = TRUE)
+mtext('From Beta(2, 2) Prior', 3)
+segments(x0 = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 23, 9), 23/32),
+         y0 = 0, y1 = 5.5,
+       lty = c(3, 2, 2, 3, 1))
+text(x = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 23, 9), 23/32), y = 6,
+    labels = c(round(c(qbeta(c(0.025, 0.25, 0.75, 0.975), 23, 9), 23/32), 3)),
+    srt = 45)
+
+curve(dbeta(x, 6, 3), from = 0, to = 1, frame.plot = FALSE, col = 'grey',
+      main = 'Beta(27, 10) Posterior Distribution', yaxt = 'n',
+      xlab = expression(pi), ylab = '', ylim = c(0, 7))
+curve(dbeta(x, 27, 10), lwd = 2, add = TRUE)
+mtext('From Beta(6, 3) Prior', 3)
+segments(x0 = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 27, 10), 27/37),
+         y0 = 0, y1 = 6,
+       lty = c(3, 2, 2, 3, 1))
+text(x = c(qbeta(c(0.025, 0.25, 0.75, 0.975), 27, 10), 27/37), y = 6.5,
+    labels = c(round(c(qbeta(c(0.025, 0.25, 0.75, 0.975), 27, 10), 27/37), 3)),
+    srt = 45)
+@
+\caption{Posterior distributions of the probability of prefering Liz's
+cupcakes from four different prior distributions. The vertical lines denote
+posterior means, and 95\% and 50\% posterior intervals. The light grey curves
+are the prior densities.}
+\label{cupposts}
+\end{figure}
+
+The informative prior distribution resulted in a
+\(\pi|y=21\sim\mathrm{Beta}(27,10)\) posterior distribution. On average,
+tasters prefer Liz's cupcakes over Megan's cupcakes in 73.0\% of all trials,
+and there is a posterior 99.8\% chance that Liz's cupcakes are prefered at
+least half of the time.
+
+\item %b
+
+For any prior distribution, the prior probability of \(M_1\) is
+\(p(M_1)=Pr(\pi\geq 0.7)\) and the posterior probability of \(M_1\) is
+\(p(M_1|y)=Pr(\pi<0.7|y)\). These values, as well as the prior and posterior
+odds and the Bayes factors, are tabulated for each of the four priors in
+Table \ref{bftab}.
+
+<<bftab,echo=FALSE,results='asis'>>=
+# p(M_1)
+pM1 <- pbeta(0.7, c(0:2, 6), c(0:3), lower.tail = FALSE)
+
+# p(M_2)
+pM2 <- 1 - pM1
+
+# Prior odds
+priorO <- pM1/pM2
+
+# p(M_1|y)
+pM1y <- pbeta(0.7, c(21:23, 27), c(7:10), lower.tail = FALSE)
+
+# p(M_2|y)
+pM2y <- 1 - pM1y
+
+# Posterior odds
+postO <- pM1y/pM2y
+
+# Bayes factor
+BF <- postO/priorO
+
+bftab <- rbind(pM1, pM2, priorO, pM1y, pM2y,postO, BF)
+colnames(bftab) <- c('\\(\\pi\\sim\\mathrm{Beta}(0,0)\\)',
+                     '\\(\\pi\\sim\\mathrm{Beta}(1,1)\\)',
+                     '\\(\\pi\\sim\\mathrm{Beta}(2,2)\\)',
+                     '\\(\\pi\\sim\\mathrm{Beta}(6,3)\\)')
+rownames(bftab) <- c('\\(Pr(\\pi\\geq 0.7)\\)',
+                     '\\(Pr(\\pi<0.7)\\)',
+                     'Prior Odds',
+                     '\\(Pr(\\pi\\geq 0.7|y=21)\\)',
+                     '\\(Pr(\\pi<0.7|y=21)\\)',
+                     'Posterior Odds',
+                     'Bayes Factor')
+print(xtable(bftab, digits = 3, align = 'lcccc', label = 'bftab',
+             caption = 'Probabilities, odds, and Bayes factors comparing
+             \\(M_1\\): \\(\\pi\\geq 0.7\\) and \\(M_2\\): \\(\\pi<0.7\\).'),
+      sanitize.text.function = function(x){return(x)},
+      table.placement = 'h!')
+@
+
+\end{enumerate}
+
+\item %3
+
+Bayes factors are a common way to choose between different Bayesian models,
+but they should be used with caution. In particular, problems can arise when
+the models use highly dispersed prior distributions. For example, consider
+the model \(y\sim\mathrm{N}(\mu,1)\) for the data, where \(\mu\) is the mean.
+Suppose we compare Model 1, where \(\mu=0\), to Model 2, where \(\mu\) is
+unknown and has a prior distribution \(\mu\sim\mathrm{\mu_0,\tau^2}\) with
+\(\tau\) specified. By following an example from Link and Barker (2006),
+the Bayes factor for Model 1 is
+\begin{align*}
+\mathrm{BF}_{1,2}=\sqrt{1+n\tau^2}e^{-\mu_0n\bar{y}+\frac{\mu_0^2}{2}
+-\frac{n^2\tau^2}{2(n\tau^2+1)}(\bar{y}-\mu_0)^2}\text{.}
+\end{align*}
+Often, \(\tau\) is set to a large value to create a very wide prior
+distribution that is meant not to influence the inferences. However, for
+very large values of \(\tau\), the Bayes factor will approach infinity and
+will always prefer Model 1 even if the data make \(\mu=0\) appear unlikely.
+Often, Bayes factors are unhelpful when uninformative priors are used.
+
+\item %4
+
+Bayes factors are one way to asses the strength of evidence in support of
+a particular model or hypothesis over another in a Bayesian analysis. There
+are parallels between Bayes factors and likelihood ratios in both form and
+purpose. The definition of a Bayes factor is
+\begin{align*}
+\mathrm{BF}_{1,2}=\frac{\text{Posterior odds}}
+{\text{Prior odds}}.
+\end{align*}
+When comparing two models \(M_1\) and \(M_2\), this can be rewritten as
+\begin{align*}
+\mathrm{BF}_{1,2}=\frac{p(y|M_1)}{p(y|M_2)}
+\end{align*}
+where \(p(y|M_1)\) and \(p(y|M_2)\) are the marginal likelihoods under
+each model. That is, they are the results of averaging the likelihood function
+of the parameters over all possible values of the parameters in each model,
+Thus, the marginal likelihoods can be thought of as likelihood functions for
+the models themselves, and so the Bayes factor is a ratio of likelihoods.
+
+The Bayes factor gives a relative measurement of how strongly a particular
+set of data \(y\) supports a one model over another, with large values of
+the Bayes factor indicating that the model in the numerator is more likely.
+This is analogous to the use of a likelihood ratio, where large values
+imply that the model in the denominator should not be preferred over the
+model in the numerator. Unlike likelihood ratios, Bayes factors cannot
+easily be transformed to follow known distributions, but some guidelines
+have been suggested to aid interpretation.
+
+Bayes factors have the advantages that the incorporate uncertainty about
+the parameters by averaging over all possible values, and that they can be
+interpreted as directly favoring the numerator rather than showing only a
+lack of evidence for the denominator. However, the lack of a known
+distribution can make interpretation difficult, and rigidly following
+guidlines leads to the same issues as clinging closely to p-value cutoffs.
+Like hypothesis tests, Bayes factors should be used with caution.
+
+\pagebreak
+\item %5
+
+The data are \(y=(1, 3, 5, 7, 7)\). Use Bayes factors to compare a Poisson
+model and a Geometric model.
+
+\begin{enumerate}
+
+\item %a
+
+Let \(M_1\) be the model \(y\sim\mathrm{Poisson}(5)\) and let \(M_2\) be
+the model \(y\sim\mathrm{Geometric}(0.15)\).
+
+\begin{enumerate}
+
+\item %1
+
+If both models are equally likely, the prior odds for \(M_2\) are
+\begin{align*}
+\frac{p(M_2)}{p(M_1)}=\frac{0.5}{0.5}=1\text{.}
+\end{align*}
+
+\item %2
+
+Then the posterior odds for \(M_2\) are
+\begin{align*}
+\frac{p(M_2|y)}{p(M_1|y)}&=\frac{p(M_2)p(y|M_2)/p(y)}{p(M_1)p(y|M_1)/p(y)}\\
+&=\frac{(0.5)\left((0.15)^5(0.85)^{\sum y_i}\right)}
+{(0.5)\left(e^{-25}\frac{5^{\sum y_i}}{\prod(y_i!)}\right)}\\
+&=e^{25}(0.15)^5(0.85/5)^{\sum y_i}\prod(y_i!)\\
+&=e^{25}(0.15)^5(0.17)^{23}(1!)(3!)(5!)(7!)(7!)\\
+&=0.1997
+\end{align*}
+or about 5 to 1 against.
+
+\item %3
+
+The Bayes factor is
+\begin{align*}
+\mathrm{BF}_{2,1}=\frac{\text{Posterior odds}}{\text{Prior odds}}
+=\frac{0.1997}{1}
+=0.1997\text{.}
+\end{align*}
+
+\end{enumerate}
+
+\item %b
+
+Now let \(M_1\) be the model \(y|\lambda\sim\mathrm{Poisson}(\lambda)\),
+\(\lambda\sim\mathrm{Unif}(0,30)\), and let \(M_2\) be the model
+\(y|\pi\sim\mathrm{Geometric}(\pi)\),
+\(\dfrac{1-\pi}{\pi}\sim\mathrm{Uniform}(0,30)\). This implies a prior
+density of
+\begin{align*}
+p(\pi)=\frac{1}{30\pi^2}, \ \frac{1}{31}<\pi<1\text{.}
+\end{align*}
+
+\begin{enumerate}
+
+\item %1
+
+The prior odds for \(M_2\) are
+\begin{align*}
+\frac{p(M_2)}{p(M_1)}=\frac{0.5}{0.5}=1\text{.}
+\end{align*}
+
+\item %2
+
+To find the posterior odds, we first need the marginal distributions of
+\(y\) under each model. For \(M_1\),
+\begin{align*}
+p(y|M_1)&=\int_{0}^{30}p(\lambda|M_1)p(y|\lambda,M_1)d\lambda\\
+&=\int_{0}^{30}\frac{1}{30}\frac{e^{-5\lambda}\lambda^{23}}
+{(1!)(3!)(5!)(7!)(7!)}d\lambda\\
+&=\frac{\Gamma(24)}{30(1!)(3!)(5!)(7!)(7!)5^{24}}Pr(G<30)
+\end{align*}
+where \(G\) is a \(\mathrm{Gamma}(24,5)\) random variable (using Gelman's
+parameterization), so
+\begin{equation*}
+p(y|M_1)=\frac{10}{\text{
+<<calculate1,echo=FALSE,results='asis'>>=
+cat(prettyNum(10 * 30 * (5^24) *
+                exp(sum(lfactorial(c(1, 3, 5, 7, 7)))-lgamma(24)) *
+                pgamma(30, 24, 5, lower.tail = TRUE), big.mark = ','))
+@
+}\text{.}}
+\end{equation*}
+Then for \(M_2\),
+\begin{align*}
+p(y|M_2)&=\int_{\frac{1}{31}}^1p(\pi|M_2)p(y|\pi,M_2)d\pi\\
+&=\int_{\frac{1}{31}}^1\frac{1}{30\pi^2}\pi^5(1-\pi)^{23}d\pi\\
+&=\frac{1}{30}\int_{\frac{1}{31}}^1\pi^3(1-\pi)^{23}d\pi\\
+&=\frac{1}{30}\frac{\Gamma(4)\Gamma(24)}{\Gamma(28)}
+Pr\left(B>\frac{1}{31}\right)
+\end{align*}
+where \(B\sim\mathrm{Beta}(4,24)\) random variable, so
+\begin{equation*}
+p(y|M_2)=\frac{5}{\text{
+<<calculate,echo=FALSE,results='asis'>>=
+cat(prettyNum(5 * 30 / (exp(lgamma(4) + lgamma(24) - lgamma(28)) *
+            pbeta(1/31, 4, 24, lower.tail = FALSE)), big.mark = ','))
+@
+}\text{.}}
+\end{equation*}
+Finally, the posterior odds for \(M_2\) are
+\begin{align*}
+\frac{p(M_2|y)}{p(M_1|y)}&=\frac{p(M_2)p(y|M_2)/p(y)}{p(M_1)p(y|M_1)/p(y)}\\
+&=\frac{(0.5)(10/\text{12,650,291})}{(0.5)(5/\text{10,641,692})}\\
+&=0.5944\text{,}
+\end{align*}
+about 10 to 6 against.
+
+\item %3
+
+The Bayes factor is
+\begin{align*}
+\mathrm{BF}_{2,1}=\frac{\text{Posterior odds}}{\text{Prior odds}}
+=\frac{0.5944}{1}
+=0.5944\text{.}
+\end{align*}
+
+\end{enumerate}
+
+\end{enumerate}
+
+\end{enumerate}
+
+\end{document}

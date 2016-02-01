@@ -1,0 +1,897 @@
+\documentclass[11pt]{article}
+\usepackage{fullpage}
+
+\usepackage{amsmath}
+
+\title{Stat 532 Assignment 7}
+\author{Kenny Flagg}
+\date{October 19, 2015}
+
+\begin{document}
+
+\maketitle
+
+<<setup,echo=FALSE, message=FALSE,cache=FALSE>>=
+require(knitr)
+opts_chunk$set(fig.width = 10, fig.height = 4,
+               out.width = '\\linewidth', out.height = '0.4\\linewidth',
+               dev = 'pdf', size = 'footnotesize')
+knit_theme$set('print')
+require(xtable)
+require(R2jags)
+require(mvtnorm)
+require(pscl)
+@
+
+\begin{enumerate}
+
+\item %1
+
+\begin{enumerate}
+
+\item %a
+
+For completeness, I plotted the priors on both the original scale and
+the transformed scale.
+
+<<prob1a2,echo=FALSE, out.height='0.6\\linewidth',fig.height=6>>=
+# Plot the priors
+par(mfrow=c(2,3))
+
+curve(dnorm(x,2,10), from = -30, to = 30, main = expression(mu),
+      ylab = 'Normal(2, 100) Density', xlab = expression(mu))
+curve(densigamma(x, 2.000004, 0.001), from = 0.001, to = 0.01,
+      main = expression(sigma^2), ylab = 'InvGamma(2.000004, 0.001) Density',
+      xlab = expression(sigma^2))
+curve(dgamma(x, 0.25, 0.25), from = 0, to = 4, main = expression(m[1]),
+      ylab = 'Gamma(0.25, 0.25)', xlab = expression(m[1]))
+
+curve(dnorm(x, 2, 10), from = -30, to = 30, main = expression(phi[1]==mu),
+      ylab = 'Normal(2, 100) Density', xlab = expression(phi[1]))
+curve(densigamma(exp(2*x)*2*exp(2*x), 2.000004, 0.001),
+      from = -2.6, to = -1.6,
+      main = expression(phi[2]==log(sigma)),
+      ylab = 'InvGamma(2.000004, 0.001) Density', xlab = expression(phi[2]))
+curve(dgamma(exp(x), 0.25, 0.25)*exp(x), from = -10, to = 4,
+      main = expression(phi[3]==log(m[1])),
+      ylab = 'Gamma(0.25, 0.25)', xlab = expression(phi[3]))
+@
+
+I modified the multivariate Metropolis-Hastings sampler into an independence
+chain. I reused the same code to numerically find the posterior mode and
+variance-covariance matrix, and then used a multivariate normal proposal
+distribution with a mean at the posterior mode and a variance-covariance
+matrix of two times the posterior variance-covariance matrix.
+
+I chose initial values of
+\begin{align*}
+(\phi_1,\phi_2,\phi_3) &= (1.8, -3, -2.5)\text{,} \\
+(\phi_1,\phi_2,\phi_3) &= (1.7, -3.8, -0.2)\text{,} \\
+(\phi_1,\phi_2,\phi_3) &= (1.9, -5,  0.3)
+\end{align*}
+because these were outside of the center of the posterior distribution.
+
+I renamed many of the functions and variables to fit my coding style,
+and I created a loop to go through the three chains. Since the original
+multivariate M-H sampler ran successfully, I started out by running the
+independence chain for 10,000 iterations. The code occupies the next two
+pages. Traceplots follow on page 4.
+
+<<prob1a1,echo=TRUE,message=FALSE,cache=TRUE>>=
+# The data
+dose <- c(1.6907, 1.7242, 1.7552, 1.7842, 1.8113, 1.8369, 1.8610, 1.8839)
+killed <- c(6, 13, 18, 28, 52, 53, 61, 60)
+exposed <- c(59,60,62,56,63,59,62,60)
+
+# Log likelihood for phi=(mu, log(sig2), log(m1)) given the data
+l.lik <- function(phi, dose, y, n){
+  mu <- phi[1]
+  sig <- exp(phi[2])
+  m1 <- exp(phi[3])
+  x <- (dose - mu) / sig
+  llik <- m1*y*(x-log(1+exp(x))) + (n-y)*log(1-((exp(x)/(1+exp(x)))^m1))
+  out <- sum(llik)
+  return(out)
+}
+
+# Transformed prior
+# I worked out the transformed distributions on paper and got the same result
+l.prior <- function(phi, a0 = 0.25, b0 = 0.25, c0 = 2,
+                    d0 = 10, e0 = 2.000004, f0 = 0.001){
+  log.p.phi1 <- dnorm(phi[1], mean = c0, sd = d0, log = TRUE)
+  log.p.phi2 <- -2*e0*phi[2] - f0*(exp(-2*phi[2]))
+  log.p.phi3 <- phi[3]*a0 - b0*exp(phi[3])
+  log.p <- log.p.phi1 + log.p.phi2 + log.p.phi3 #assuming priors independent
+  return(log.p)
+}
+
+# Log unnormalized posterior
+l.unpost <- function(phi, dose, y, n){
+  llik <- l.lik(phi, dose = dose, y = y, n = n)
+  lprior <- l.prior(phi)
+  out <- llik + lprior
+  return(out)
+}
+
+# Numerically find the posterior mode
+optim.out <- optim(c(1.77, 0.03, 0.35), l.unpost,
+                   dose = dose, y = killed, n = exposed,
+                   control = list(fnscale=-100),
+                   method = 'Nelder-Mead', hessian = TRUE)
+
+# Use the posterior mode and twice the variance-covariance matrix as
+# the parameters of the MVN propasal distribution
+center <- optim.out$par
+sig.matrix <- 2*solve(-optim.out$hessian)
+
+set.seed(457234)
+
+nsims <- 10000
+nchains <- 3
+
+# Create a list of empty matrices
+phi.chains <- replicate(nchains,
+                        matrix(nrow=nsims, ncol=3,
+                               dimnames = list(NULL, c('phi1','phi2','phi3'))),
+                        simplify=FALSE)
+
+# Set inital values
+phi.chains[[1]][1,] <- c(1.8, -3, -2.5)
+phi.chains[[2]][1,] <- c(1.7, -3.8, -0.2)
+phi.chains[[3]][1,] <- c(1.9, -5,  0.3)
+
+# Keep track of the jumps
+jumps <- matrix(nrow = nsims-1, ncol = nchains)
+
+# Loop for iterations
+for (i in 2:nsims){
+  # Loop for chains
+  for(j in 1:nchains){
+    # Get a candidate
+    phi.cand <- rmvnorm(1, mean=center, sigma=sig.matrix)
+
+    # Ratio numerator
+    log.r.num <- l.unpost(phi.cand, dose=dose, y=killed, n=exposed) +
+      dmvnorm(phi.chains[[j]][i-1,], mean=center, sigma=sig.matrix, log=TRUE)
+
+    # Ratio denominator
+    log.r.denom <- l.unpost(phi.chains[[j]][i-1,],
+                            dose=dose, y=killed, n=exposed) +
+      dmvnorm(phi.cand, mean=center, sigma=sig.matrix, log=TRUE)
+
+    # Ratio
+    log.r <- log.r.num - log.r.denom
+
+    # Accept with probability min(1, r)
+    u <- runif(1)
+    if(u<=exp(log.r)){
+      # Accept the candidate and note that we jumped
+      phi.chains[[j]][i,] <- phi.cand
+      jumps[i-1,j] <- 1
+    }else{
+      # Do not accept the candidate and note that we did not jump
+      phi.chains[[j]][i,] <- phi.chains[[j]][i-1,]
+      jumps[i-1,j] <- 0
+    }
+  }
+}
+@
+
+\pagebreak
+
+The traceplots of the full sequences of 10,000 iterations show that the
+chains immediately began to mix together in one region on the parameter
+space. Otherwise, they are not very informative.
+
+<<output,echo=FALSE,message=FALSE,out.height='0.7\\linewidth',fig.height=7>>=
+# Use coda to help
+phi.mcmc <- mcmc.list(lapply(phi.chains, mcmc))
+
+#Look at chains
+par(mfrow=c(3, 1))
+traceplot(phi.mcmc, col = rainbow(nchains), lty = c(4, 2, 3), smooth = FALSE)
+@
+
+The next set of traceplots show the first hundred iterations, and another
+hundred iterations from later in the chains. All three chains appear to
+have converged within 20 iterations. The independence of the candidates is
+apparent since the plots show many large jumps and little oscillation.
+
+<<firsthundy,echo=FALSE,out.height='0.5\\linewidth',fig.height=5>>=
+par(mfrow=c(2, 3))
+traceplot(phi.mcmc, col = rainbow(nchains),
+          lty = c(4, 2, 3), xlim = c(1, 100), smooth = FALSE)
+traceplot(phi.mcmc[,1], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(6601, 6700), ylim = c(1.77, 1.85),
+          main = 'Trace of phi1')
+traceplot(phi.mcmc[,2], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(6601, 6700), ylim = c(-4.6, -3.4),
+          main = 'Trace of phi2')
+traceplot(phi.mcmc[,3], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(6601, 6700), ylim = c(-1.9, -0.2),
+          main = 'Trace of phi3')
+@
+
+\pagebreak
+The chains had a multivariate PSRF of
+<<mpsrf1,echo=FALSE,results='asis'>>=
+cat(round(gelman.diag(phi.mcmc)$mpsrf,4))
+@
+which is evidence that that chains converged. The effective sample
+sizes were computed as
+<<neff1,echo=FALSE,results='asis'>>=
+neff1 <- effectiveSize(phi.mcmc)
+cat('\\(n_{\\phi_1}=', round(neff1['phi1'], 1),
+    '\\), \\(n_{\\phi_2}=', round(neff1['phi2'], 1),
+    '\\), and \\(n_{\\phi_3}=', round(neff1['phi3'], 1),
+    '\\),')
+@
+which do not surprise me given that the proposals were independent. Because
+of the traceplots, I decided to discard the first 20 draws as burn-in.
+
+The distributions of the 9,980 posterior draws appear below.
+
+<<inference1a1,echo=FALSE,out.height='0.6\\linewidth',fig.height=6>>=
+phi.ind.converged <- mcmc.list(lapply(phi.mcmc[21:10000,], mcmc))
+phi1.draws1 <- unlist(phi.ind.converged[,'phi1'])
+phi2.draws1 <- unlist(phi.ind.converged[,'phi2'])
+phi3.draws1 <- unlist(phi.ind.converged[,'phi3'])
+mu.draws1 <- phi1.draws1
+sig.draws1 <- exp(phi2.draws1)
+m1.draws1 <- exp(phi3.draws1)
+
+par(mfrow = c(2, 3))
+hist(phi1.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[1])),
+     xlab = expression(phi[1]))
+hist(phi2.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[2])),
+     xlab = expression(phi[2]))
+hist(phi3.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[3])),
+     xlab = expression(phi[3]))
+
+hist(mu.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+hist(sig.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+hist(m1.draws1, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+@
+
+\item %b
+
+To construct a Gibbs sampler with Metropolis-Hastings draws, I
+first found the complete conditional distributions and then modified
+the independence chain. Since the priors are independent, the complete
+conditional distributions simplify to
+\begin{align*}
+p(\mu|\sigma^2,m_1,x,y)&\propto\prod_{i=1}^{8}\mathrm{Binomial}
+\left(y_i|n_i\left(\frac{e^{x_i}}{1+e^{x_i}}\right)^{m_1}\right)
+\times\mathrm{N}(\mu|c_0,d_0^2)\text{,}\\
+p(\sigma^2|\mu,m_1,x,y)&\propto\prod_{i=1}^{8}\mathrm{Binomial}
+\left(y_i|n_i\left(\frac{e^{x_i}}{1+e^{x_i}}\right)^{m_1}\right)
+\times\mathrm{InvGamma}(\sigma^2|e_0,f_0)\text{,}\\
+p(m_1|\mu,\sigma^2,x,y)&\propto\prod_{i=1}^{8}\mathrm{Binomial}
+\left(y_i|n_i\left(\frac{e^{x_i}}{1+e^{x_i}}\right)^{m_1}\right)
+\times\mathrm{Gamma}(m_1|a_0,b_0)\text{.}
+\end{align*}
+
+I used the same starting values as before. I centered the proposal
+distribution at the current value of the parameter, and used the
+posterior variance as the variance of the proposal distribution. In
+each iteration, I drew a candidate \(\phi_1\), accepted or rejected
+it based on the M-H ratio, and repeated for \(\phi_2\) and \(\phi_3\).
+I ran three chains for 20,000 iterations. The code begins below, and
+plots appear on pages 8 and 9.
+
+<<prob1b1,message=FALSE,cache=TRUE>>=
+# Complete conditional log densities of transformed parameters
+l.phi1.cond <- function(phi, c0 = 2, d0 = 10, dose, y, n){
+  log.lik <- l.lik(phi, dose = dose, y = y, n = n)
+  log.p.phi1 <- dnorm(phi[1], mean = c0, sd = d0, log = TRUE)
+  out <- log.lik + log.p.phi1
+  return(out)
+}
+l.phi2.cond <- function(phi, ph3, e0 = 2.000004, f0 = 0.001, dose, y, n){
+  log.lik <- l.lik(phi, dose = dose, y = y, n = n)
+  log.p.phi2 <- -2*e0*phi[2] - f0*(exp(-2*phi[2]))
+  out <- log.lik + log.p.phi2
+  return(out)
+}
+l.phi3.cond <- function(phi, a0 = 0.25, b0 = 0.25, dose, y, n){
+  log.lik <- l.lik(phi, dose = dose, y = y, n = n)
+  log.p.phi3 <- phi[3]*a0 - b0*exp(phi[3])
+  out <- log.lik + log.p.phi3
+  return(out)
+}
+
+# sig.matrix is 2 times the posterior variance
+sig.gibbs <- sqrt(diag(sig.matrix)*0.5)
+
+set.seed(54673)
+
+nsims <- 20000
+nchains <- 3
+
+# Create a list of empty matrices
+phi.gibbs <- replicate(nchains,
+                       matrix(nrow=nsims, ncol=3,
+                              dimnames = list(NULL, c('phi1','phi2','phi3'))),
+                       simplify=FALSE)
+
+# Set inital values
+phi.gibbs[[1]][1,] <- c(1.8, -3, -2.5)
+phi.gibbs[[2]][1,] <- c(1.7, -3.8, -0.2)
+phi.gibbs[[3]][1,] <- c(1.9, -5,  0.3)
+
+jumps2 <- matrix(nrow = nsims-1, ncol = nchains)
+
+# Loop for iterations
+for (i in 2:nsims){
+  # Loop for chains
+  for(j in 1:nchains){
+    # Get a candidate phi1
+    phi.cand <- phi.gibbs[[j]][i-1,]
+    phi.cand[1] <- rnorm(1, mean=phi.gibbs[[j]][i-1,1],
+                         sd=sig.gibbs[1])
+
+    # Numerator with phi1
+    log.r.num <- l.phi1.cond(phi.cand, dose=dose, y=killed, n=exposed) +
+      dnorm(phi.gibbs[[j]][i-1,1], mean=phi.cand[1],
+            sd=sig.gibbs[1], log=TRUE)
+
+    # Denominator with phi2
+    log.r.denom <- l.phi1.cond(phi.gibbs[[j]][i-1,],
+                               dose=dose, y=killed, n=exposed) +
+      dnorm(phi.cand[1], mean=phi.gibbs[[j]][i-1,1],
+            sd=sig.gibbs[1], log=TRUE)
+
+    # Ratio
+    log.r <- log.r.num - log.r.denom
+
+    # Accept with probability min(1, r)
+    u <- runif(1)
+    if(u<=exp(log.r)){
+      phi.gibbs[[j]][i,1] <- phi.cand[1]
+      jumps2[i-1, 1] <- 1
+    }else{
+      phi.gibbs[[j]][i,1] <- phi.gibbs[[j]][i-1,1]
+      phi.cand[1] <- phi.gibbs[[j]][i-1,1]
+      jumps2[i-1, 1] <- 0
+    }
+
+    # Get a candidate phi2
+    phi.cand[2] <- rnorm(1, mean=phi.gibbs[[j]][i-1,2],
+                         sd=sig.gibbs[2])
+
+    # Numerator with phi2
+    log.r.num <- l.phi1.cond(phi.cand, dose=dose, y=killed, n=exposed) +
+      dnorm(phi.gibbs[[j]][i-1,2], mean=phi.cand[2],
+            sd=sig.gibbs[2], log=TRUE)
+
+    # Denominator with phi2
+    log.r.denom <- l.phi1.cond(phi.gibbs[[j]][i-1,],
+                               dose=dose, y=killed, n=exposed) +
+      dnorm(phi.cand[2], mean=phi.gibbs[[j]][i-1,2],
+            sd=sig.gibbs[2], log=TRUE)
+
+    # Ratio
+    log.r <- log.r.num - log.r.denom
+
+    # Accept with probability min(1, r)
+    u <- runif(1)
+    if(u<=exp(log.r)){
+      phi.gibbs[[j]][i,2] <- phi.cand[2]
+      jumps2[i-1, 2] <- 1
+    }else{
+      phi.gibbs[[j]][i,2] <- phi.gibbs[[j]][i-1,2]
+      phi.cand[2] <- phi.gibbs[[j]][i-1,2]
+      jumps2[i-1, 2] <- 0
+    }
+
+    # Get a candidate phi3
+    phi.cand[3] <- rnorm(1, mean=phi.gibbs[[j]][i-1,3],
+                         sd=sig.gibbs[3])
+
+    # Numerator with phi2
+    log.r.num <- l.phi1.cond(phi.cand, dose=dose, y=killed, n=exposed) +
+      dnorm(phi.gibbs[[j]][i-1,3], mean=phi.cand[3],
+            sd=sig.gibbs[3], log=TRUE)
+
+    # Denominator with phi2
+    log.r.denom <- l.phi1.cond(phi.gibbs[[j]][i-1,],
+                               dose=dose, y=killed, n=exposed) +
+      dnorm(phi.cand[3], mean=phi.gibbs[[j]][i-1,3],
+            sd=sig.gibbs[3], log=TRUE)
+
+    # Ratio
+    log.r <- log.r.num - log.r.denom
+
+    # Accept with probability min(1, r)
+    u <- runif(1)
+    if(u<=exp(log.r)){
+      phi.gibbs[[j]][i,3] <- phi.cand[3]
+      jumps2[i-1, 3] <- 1
+    }else{
+      phi.gibbs[[j]][i,3] <- phi.gibbs[[j]][i-1,3]
+      jumps2[i-1, 3] <- 0
+    }
+  }
+}
+@
+
+The traceplots show a high level of autocorrelation. These chains appeared
+to reach extreme values more frequently than the independence chains did.
+However, the Gibbs chains did stay in the same area of the sample space.
+
+<<prob1b2,echo=FALSE,message=FALSE,out.height='0.8\\linewidth',fig.height=8>>=
+phi.mcmc2 <- mcmc.list(lapply(phi.gibbs, mcmc))
+
+#Look at chains
+par(mfrow=c(3, 1))
+traceplot(phi.mcmc2, col = rainbow(nchains), lty = c(4, 2, 3), smooth = FALSE)
+@
+
+\pagebreak
+I created zoomed-in plots to further examine the chains. The first row
+of plots shows that two chains reached the center of the distribution
+in under 50 iterations, and the third joined them by the 200th iteration.
+The second illustrates that the draws were strongly correlated within
+each chain, but that the chains did slowly move about the parameter space.
+
+<<firsthundy2,echo=FALSE,out.height='0.5\\linewidth',fig.height=5>>=
+par(mfrow=c(2, 3))
+traceplot(phi.mcmc2, col = rainbow(nchains),
+          lty = c(4, 2, 3), xlim = c(1, 300), smooth = FALSE)
+traceplot(phi.mcmc2[,1], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(4801, 5300), ylim = c(1.78, 1.85),
+          main = 'Trace of phi1')
+traceplot(phi.mcmc2[,2], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(4801, 5300), ylim = c(-5.1, -3.5),
+          main = 'Trace of phi2')
+traceplot(phi.mcmc2[,3], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(4801, 5300), ylim = c(-3, -0.4),
+          main = 'Trace of phi3')
+@
+
+The multivariate PSRF is
+<<mpsrf2,echo=FALSE,results='asis'>>=
+cat(round(gelman.diag(phi.mcmc2)$mpsrf, 2))
+@
+and the effective sample sizes are low because of the autocorrelation, with
+<<neff2,echo=FALSE,results='asis'>>=
+neff2 <- effectiveSize(phi.mcmc2)
+cat('\\(n_{\\phi_1}=', round(neff2[1], 1),
+    '\\), \\(n_{\\phi_2}=', round(neff2[2], 1),
+    '\\), and \\(n_{\\phi_3}=', round(neff2[3], 1),
+    '\\).')
+@
+Since the traceplots show that each chain moved around the whole parameter
+space, it seemed like the algorithm was close to convergence and the
+results would be usable. I dropped the first 200 iterations as burn-in.
+
+The following plots are based on 19,800 posterior draws.
+
+<<inference1b1,echo=FALSE,out.height='0.6\\linewidth',fig.height=6>>=
+phi.gibbs.converged <- mcmc.list(lapply(phi.mcmc2[201:20000,], mcmc))
+phi1.draws2 <- unlist(phi.gibbs.converged[,'phi1'])
+phi2.draws2 <- unlist(phi.gibbs.converged[,'phi2'])
+phi3.draws2 <- unlist(phi.gibbs.converged[,'phi3'])
+mu.draws2 <- phi1.draws2
+sig.draws2 <- exp(phi2.draws2)
+m1.draws2 <- exp(phi3.draws2)
+
+par(mfrow = c(2, 3))
+hist(phi1.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[1])),
+     xlab = expression(phi[1]))
+hist(phi2.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[2])),
+     xlab = expression(phi[2]))
+hist(phi3.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', phi[3])),
+     xlab = expression(phi[3]))
+
+hist(mu.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+hist(sig.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+hist(m1.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+@
+
+\pagebreak
+\item %c
+
+I constructed a JAGS model for the un-transformed parameters. I let
+JAGS choose the starting values and ran three chains for 10,000
+iterations, instructing JAGS not to do any thinning or burn-in. The JAGS
+model appears below, and fits nicely on a single page.
+
+<<prob1c1>>=
+# Variables:
+#  m1     Dispersion (parameter of interest)
+#    a0     Hyperparameter - specified in data argument
+#    b0     Hyperparameter - specified in data argument
+#  mu     Location (parameter of interest)
+#    c0     Hyperparameter - specified in data argument
+#    d0     Hyperparameter - specified in data argument
+#  sigma  Scale (parameter of interest)
+#  tau    Precision  tau = 1/sigma^2
+#    e0     Hyperparameter - specified in data argument
+#    f0     Hyperparameter - specified in data argument
+#  p      Probability of death  p = (invlogit(x))^m1
+#  y      Number killed (response) - specified in data argument
+#  n      Number exposed - specified in data argument
+#  w      Dose - specified in data argument
+#  x      Standardized dose  x = (w - mu) / sigma
+jags.model <- function(){
+  # Loop for each row
+  for(i in 1:length(y)){
+    # Model
+    y[i] ~ dbinom(p[i], n[i])
+    p[i] <- pow(exp(x[i]) / (1+exp(x[i])), m1)
+    x[i] <- (w[i] - mu) / sigma
+  }
+
+  # Priors
+  m1 ~ dgamma(a0, b0)
+  mu ~ dnorm(c0, pow(d0, -2))
+  tau ~ dgamma(e0, f0)
+  sigma <- 1/sqrt(tau)
+}
+jags.data <- list('y' = killed,
+                  'n' = exposed,
+                  'w' = dose,
+                  'a0' = 0.25,
+                  'b0' = 4,
+                  'c0' = 2,
+                  'd0' = 10,
+                  'e0' = 2.000004,
+                  'f0' = 1000)
+jags.params <- c('m1', 'mu', 'sigma', 'p', 'x')
+@
+
+<<prob1c2,echo=FALSE,results='hide',message=FALSE,cache=FALSE>>=
+jags.out <- jags(data = jags.data, parameters.to.save = jags.params,
+                 model.file = jags.model, n.chains = 3, n.iter = 10000,
+                 n.burnin = 0, n.thin = 1)
+@
+
+JAGS apparently chose starting values near the center of the posterior.
+From the plots on the following page, it looks like the algorithm was
+converged from the beginning. The beginnings of the sequences did not look
+any different from later sections, so I did not discard any draws.
+
+<<prob1c3,echo=FALSE,message=FALSE,out.height='0.8\\linewidth',fig.height=8>>=
+jags.mcmc <- as.mcmc(jags.out)[,c('mu', 'sigma', 'm1')]
+
+par(mfrow=c(3, 1))
+traceplot(jags.mcmc, col = rainbow(nchains), lty = c(4, 2, 3), smooth = FALSE)
+@
+
+<<firsthundy3,echo=FALSE,out.height='0.5\\linewidth',fig.height=5>>=
+par(mfrow=c(2, 3))
+traceplot(jags.mcmc[,1], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(1, 200), ylim = c(-20, 40),
+          main = 'Trace of mu')
+traceplot(jags.mcmc[,2], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(1, 200), ylim = c(0, 200),
+          main = 'Trace of sigma')
+traceplot(jags.mcmc[,3], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(1, 200), ylim = c(0, 1.5),
+          main = 'Trace of m1')
+traceplot(jags.mcmc[,1], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(7201, 7400), ylim = c(-20, 40),
+          main = 'Trace of mu')
+traceplot(jags.mcmc[,2], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(7201, 7400), ylim = c(0, 200),
+          main = 'Trace of sigma')
+traceplot(jags.mcmc[,3], col = rainbow(nchains), smooth = FALSE,
+          lty = c(4, 2, 3), xlim = c(7201, 7400), ylim = c(0, 1.5),
+          main = 'Trace of m1')
+@
+
+The JAGS draws had a multivariate PSRF of
+<<mpsrf3,echo=FALSE,results='asis'>>=
+cat(round(gelman.diag(jags.mcmc)$mpsrf, 2))
+@
+which suggests that the chains nearly converged, but this value may be
+inaccurate since the distributions of \(\sigma\) and \(m_1\) are skewed.
+The effective sample sizes were
+<<neff3,echo=FALSE,results='asis'>>=
+neff3 <- effectiveSize(jags.mcmc)
+cat('\\(n_{\\mu}=', round(neff3[1], 1),
+    '\\), \\(n_{\\sigma}=', round(neff3[2], 1),
+    '\\), and \\(n_{m_1}=', round(neff3[3], 1),
+    '\\).')
+@
+I don't think any of these are problematically small, but I don't know why
+\(n_{\sigma^2}\) was so much larger than the others. The black-box gave nice
+results with little effort, but given all the work I put into my Gibbs sampler
+for the previous part, I am curious what JAGS did behind-the-scenes.
+
+The plots below are based on 10,000 posterior draws.
+
+<<inference1c1,echo=FALSE,out.height='0.3\\linewidth',fig.height=3>>=
+mu.draws3 <- unlist(jags.mcmc[,'mu'])
+sig.draws3 <- unlist(jags.mcmc[,'sigma'])
+m1.draws3 <- unlist(jags.mcmc[,'m1'])
+
+par(mfrow = c(1, 3))
+hist(mu.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+hist(sig.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+hist(m1.draws2, freq = FALSE, breaks = 50,
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+@
+
+\item %d
+
+<<megans,echo=FALSE,cache=TRUE>>=
+set.seed(7623)
+
+llik.fun <- function(theta.vec, dose.vec, y.vec, n.vec) {
+       mu <- theta.vec[1]
+       sig <- theta.vec[2]
+       m1 <- theta.vec[3]
+       x.vec <- (dose.vec - mu)/sig
+	   llik.vec <- m1*y.vec*(x.vec-log(1+exp(x.vec))) + (n.vec - y.vec)*log(1-((exp(x.vec)/(1+exp(x.vec)))^m1))
+       out <- sum(llik.vec)
+       return(out)
+	}
+
+### This first function takes the original params as inputs
+l.prior.fun <- function(theta.vec, a0=0.25, b0=0.25, c0=2, d0=10, e0=2.000004, f0=0.001) {
+      phi1 <- theta.vec[1]
+      phi2 <- log(theta.vec[2])
+      phi3 <- log(theta.vec[3])
+      log.p.phi1 <- log(dnorm(phi1, mean=c0, sd=d0))
+      log.p.phi2 <- (-2*e0*phi2) - (f0*(exp(-2*phi2)))
+      log.p.phi3 <- (phi3*a0) - (b0*exp(phi3))
+      log.p <- log.p.phi1 + log.p.phi2 + log.p.phi3 #assuming priors independent
+      return(log.p)
+    }
+
+### This second function takes the transformed params as inputs
+l.prior.fun2 <- function(phi.vec, a0=0.25, b0=0.25, c0=2, d0=10, e0=2.000004, f0=0.001) {
+      phi1 <- phi.vec[1]
+      phi2 <- phi.vec[2]
+      phi3 <- phi.vec[3]
+      log.p.phi1 <- log(dnorm(phi1, mean=c0, sd=d0))
+      log.p.phi2 <- -2*e0*phi2 - (f0*(exp(-2*phi2)))
+      log.p.phi3 <- phi3*a0 - (b0*exp(phi3))
+      log.p <- log.p.phi1 + log.p.phi2 + log.p.phi3 #assuming priors independent
+      return(log.p)
+    }
+
+l.unpost.fun <- function(theta.vec, dose.vec, y.vec, n.vec) {
+     llik <- llik.fun(theta.vec, dose.vec=dose.vec, y.vec=y.vec, n.vec=n.vec)
+     lp <- l.prior.fun(theta.vec)
+     lout <- llik + lp
+     return(lout)
+    }
+
+l.unpost.fun2 <- function(phi.vec, dose.vec, y.vec, n.vec) {
+     theta.vec <- c(phi.vec[1], exp(phi.vec[2]), exp(phi.vec[3]))
+     llik <- llik.fun(theta.vec, dose.vec=dose.vec, y.vec=y.vec, n.vec=n.vec)
+     lp <- l.prior.fun2(phi.vec)
+     lout <- llik + lp
+     return(lout)
+    }
+
+   VarCov <- solve(-optim.out$hessian)
+
+### Now, redo including off-diagonals of the variance covariance matrix
+   nsim <- 10000  #number of iteration
+   phi.mat1 <- matrix(NA, nrow=nsim, ncol=3) #chain 1
+   phi.mat2 <- matrix(NA, nrow=nsim, ncol=3) #chain 2
+   phi.mat3 <- matrix(NA, nrow=nsim, ncol=3) #chain 3
+   jump.vec1 <- numeric(nsim-1) #keep track of when we jump (accept candidates)
+   jump.vec2 <- numeric(nsim-1)
+   jump.vec3 <- numeric(nsim-1)
+   phi.mat1[1,] <- c(1.8, -3, -2.5)
+   phi.mat2[1,] <- c(1.7, -3.8, -0.2)
+   phi.mat3[1,] <- c(1.9, -5,  0.3)
+
+   for (i in 2:nsim) {
+     phi.cur1 <- phi.mat1[i-1,]
+     phi.cur2 <- phi.mat2[i-1,]
+     phi.cur3 <- phi.mat3[i-1,]
+     phi.cand1 <- rmvnorm(1, mean=phi.cur1, sigma=2*VarCov)
+     phi.cand2 <- rmvnorm(1, mean=phi.cur2, sigma=2*VarCov)
+     phi.cand3 <- rmvnorm(1, mean=phi.cur3, sigma=2*VarCov)
+
+     log.r.num1 <- l.unpost.fun2(phi.cand1, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cur1, mean=phi.cand1, sigma=2*VarCov, log=TRUE)
+     log.r.num2 <- l.unpost.fun2(phi.cand2, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cur2, mean=phi.cand2, sigma=2*VarCov, log=TRUE)
+     log.r.num3 <- l.unpost.fun2(phi.cand3, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cur3, mean=phi.cand3, sigma=2*VarCov, log=TRUE)
+
+     log.r.denom1 <- l.unpost.fun2(phi.cur1, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cand1, mean=phi.cur1, sigma=2*VarCov, log=TRUE)
+     log.r.denom2 <- l.unpost.fun2(phi.cur2, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cand2, mean=phi.cur2, sigma=2*VarCov, log=TRUE)
+     log.r.denom3 <- l.unpost.fun2(phi.cur3, dose.vec=dose, y.vec=killed, n.vec=exposed) +
+                     dmvnorm(phi.cand3, mean=phi.cur3, sigma=2*VarCov, log=TRUE)
+
+     log.r1 <- log.r.num1 - log.r.denom1
+     log.r2 <- log.r.num2 - log.r.denom2
+     log.r3 <- log.r.num3 - log.r.denom3
+
+     p.accept1 <- min(1, exp(log.r1))
+     p.accept2 <- min(1, exp(log.r2))
+     p.accept3 <- min(1, exp(log.r3))
+
+     u.vec <- runif(3)
+     ifelse(u.vec[1] <= p.accept1, phi.mat1[i,]<- phi.cand1, phi.mat1[i,] <- phi.cur1)
+     ifelse(u.vec[2] <= p.accept2, phi.mat2[i,]<- phi.cand2, phi.mat2[i,] <- phi.cur2)
+     ifelse(u.vec[3] <= p.accept3, phi.mat3[i,]<- phi.cand3, phi.mat3[i,] <- phi.cur3)
+
+     jump.vec1[i-1] <- ifelse(u.vec[1] <= p.accept1, 1, 0)
+     jump.vec2[i-1] <- ifelse(u.vec[2] <= p.accept2, 1, 0)
+     jump.vec3[i-1] <- ifelse(u.vec[3] <= p.accept3, 1, 0)
+    }
+
+    phi.post1 <- mcmc(phi.mat1[201:10000,])
+    phi.post2 <- mcmc(phi.mat2[201:10000,])
+    phi.post3 <- mcmc(phi.mat3[201:10000,])
+    phi.mcmc <- mcmc.list(list(phi.post1, phi.post2, phi.post3))
+@
+
+For comparison, I re-ran the multivariate Metropolis-Hastings sampler
+with the same starting values that I used for the independence chain and
+the Gibbs sampler. I threw out 200 iterations of burn-in and kept 9,800
+draws. The effective sample sizes were
+<<neff4,echo=FALSE,results='asis'>>=
+neff4 <- effectiveSize(phi.mcmc)
+cat('\\(n_{\\phi_1}=', round(neff4[1], 1),
+    '\\), \\(n_{\\phi_2}=', round(neff4[2], 1),
+    '\\), and \\(n_{\\phi_3}=', round(neff4[3], 1),
+    '\\).')
+@
+
+The plots on this page show the results from all three algorithms,
+with vertical lines marking the 5th, 25th, 50th, 75th, and 95th percentiles.
+All three samplers produced very similar posterior distributions.
+
+<<allplots1,echo=FALSE,out.height='0.25\\linewidth',fig.height=2.5>>=
+mu.draws4 <- unlist(phi.mcmc[,1])
+sig.draws4 <- exp(unlist(phi.mcmc[,2]))
+m1.draws4 <- exp(unlist(phi.mcmc[,3]))
+
+par(mfrow = c(1, 3), mar = c(4, 3, 2, 2), oma = c(0, 2, 0, 0))
+
+hist(mu.draws4, freq = FALSE, breaks = 200,
+     xlim = c(1.75, 1.85), ylim = c(0, 40),
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+abline(v = quantile(mu.draws4, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(sig.draws4, freq = FALSE, breaks = 60,
+     xlim = c(0, 0.05), ylim = c(0, 120),
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+abline(v = quantile(sig.draws4, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(m1.draws4, freq = FALSE, breaks = 500,
+     xlim = c(0, 1.3), ylim = c(0, 4),
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+abline(v = quantile(m1.draws4, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+mtext('Multivariate M-H', side = 2, outer = TRUE)
+
+hist(mu.draws1, freq = FALSE, breaks = 50,
+     xlim = c(1.75, 1.85), ylim = c(0, 40),
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+abline(v = quantile(mu.draws1, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(sig.draws1, freq = FALSE, breaks = 40,
+     xlim = c(0, 0.05), ylim = c(0, 120),
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+abline(v = quantile(sig.draws1, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(m1.draws1, freq = FALSE, breaks = 50,
+     xlim = c(0, 1.3), ylim = c(0, 4),
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+abline(v = quantile(m1.draws1, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+mtext('M-H Independence Chain', side = 2, outer = TRUE)
+
+hist(mu.draws2, freq = FALSE, breaks = 50,
+     xlim = c(1.75, 1.85), ylim = c(0, 40),
+     main = expression(paste('Posterior Distribution of ', mu)),
+     xlab = expression(mu))
+abline(v = quantile(mu.draws2, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(sig.draws2, freq = FALSE, breaks = 50,
+     xlim = c(0, 0.05), ylim = c(0, 120),
+     main = expression(paste('Posterior Distribution of ', sigma)),
+     xlab = expression(sigma))
+abline(v = quantile(sig.draws2, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+hist(m1.draws2, freq = FALSE, breaks = 75,
+     xlim = c(0, 1.3), ylim = c(0, 4),
+     main = expression(paste('Posterior Distribution of ', m[1])),
+     xlab = expression(m[1]))
+abline(v = quantile(m1.draws2, c(0.05, 0.25, 0.5, 0.75, 0.95)), lty = 2)
+mtext('Gibbs with M-H', side = 2, outer = TRUE)
+@
+
+\pagebreak
+For further comparison, I have tabulated the effective sample sizes and
+acceptance rates.
+
+\begin{center}\begin{tabular}{lcrrrrrr}
+Algorithm & Draws & \(n_{\mu}\) & \(n_{\sigma}\) & \(n_{m_1}\) &
+\(\mu\) Rate &\(\sigma\) Rate &\(m_1\) Rate \\
+\hline
+<<table,echo=FALSE,results='asis'>>=
+cat('Metropolis-Hastings & 10,000', round(neff4, 1), round(mean(jump.vec1), 3),
+    round(mean(jump.vec2), 3), round(mean(jump.vec3), 3), sep = ' & ')
+cat('\\\\ Independence Chain & 10,000', round(neff1, 1),
+    round(apply(jumps, 2, mean), 3), sep = ' & ')
+cat('\\\\ Gibbs with M-H & 20,000', round(neff2, 1),
+    round(apply(jumps2, 2, mean), 3), sep = ' & ')
+@
+\end{tabular}\end{center}
+
+All three algorithms have strengths and weaknesses that make them useful
+for different situations. There is no single one that is best for everything.
+
+The Metropolis-Hastings algorithm has the strength of being versatile and
+easy to understand. I imagine the chain walking through the parameter space,
+and the proposal distribution controls how it looks around the vicinity
+of its current location. It is easy to choose a reasonable proposal
+distribution and then tune it to work very well. The only downside is that
+some effort must be put into the tuning process.
+
+In this example, the independence chain was certainly the most efficient.
+It converged almost immediately and had the highest acceptance rates.
+Since the candidates are independent of the chain, there is very little
+autocorrelation, so it moves around the parameter space quickly. As a
+result, a small sample size is acceptable. It does have one major weakness
+in that the proposal distribution must be chosen very carefully. I think
+a big part of the reason it did well here is that quite a bit of effort
+went into studying the target distribution, and creating a proposal
+distribution that approximated the proposal distribution near its mode.
+I see a problem in that the chain will not thoroughly cover the space
+because the candidates will keep pulling it back toward the mode. If
+the target distribution is multimodal or has an irregular shape, I would
+not expect an independence chain to yield accurate results.
+
+The biggest advantage of a Gibbs sampler is that, in the algorithm's
+purest form, a proposal distribution is not necessary. When all of the
+complete conditional distributions can be easily sampled from, a Gibbs
+sampler would be quick and easy to program. However, it has many drawbacks.
+Since the draws come directly from the complete conditional distributions,
+they are highly autocorrelated. As a result, the sampler can be slow to
+explore the parameter space, so more draws may be needed than when using
+other algorithms. Additionally, when another method of sampling is be
+nested within the Gibbs sampler, I find the problem to be conceptually
+confusing. In that case, proposal distributions must be chosen, and each
+iteration requires a candidate for each parameter to be drawn and either
+accepted or rejected. At that point, it seems more straightforward to use a
+Metropolis-Hastings sampler.
+
+The independence chain and Gibbs sampler are each suited to a certain
+type of problem. The independence chain performs excellently when the
+target distribution is well-understood or can be approximated. Gibbs seems
+most useful when there are many parameters so that the joint target
+distribution is complicated, but the complete conditionals are easy to
+work with. Metropolis-Hastings is a general-purpose fall-back for other
+situations.
+
+\end{enumerate}
+
+\end{enumerate}
+
+\end{document}
